@@ -1,0 +1,31 @@
+// Local development runner — wires the real orchestrator app together with
+// all mock services (TMF-701, action registry, task runner, pamconsumer)
+// and the demo flow trigger endpoint in a single JVM.
+//
+// Usage:  ./gradlew :local-dev:bootRun
+//    or:  make run
+
+plugins {
+    id 'org.springframework.boot'
+}
+
+dependencies {
+    // The real orchestrator
+    implementation project(':task-orchestrator-app')
+
+    // All mock services
+    implementation project(':mock-tmf701')
+    implementation project(':mock-action-registry')
+    implementation project(':mock-pamconsumer')
+    implementation project(':mock-task-runner')
+
+    // Web + Kafka (needed by DemoFlowTrigger)
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.kafka:spring-kafka'
+
+    // PostgreSQL + Flyway (runtime)
+    runtimeOnly 'org.postgresql:postgresql'
+    runtimeOnly 'org.flywaydb:flyway-core'
+    runtimeOnly 'org.flywaydb:flyway-database-postgresql'
+}

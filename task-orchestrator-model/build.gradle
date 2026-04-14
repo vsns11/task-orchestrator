@@ -1,0 +1,13 @@
+// Shared DTOs and domain constants — no database, no Spring, no JPA.
+// Only Jackson for JSON serialization and Lombok for boilerplate reduction.
+
+plugins {
+    id 'java-library'
+}
+
+dependencies {
+    // Jackson annotations (@JsonInclude, @JsonIgnoreProperties, etc.)
+    api 'com.fasterxml.jackson.core:jackson-annotations'
+    api 'com.fasterxml.jackson.core:jackson-databind'
+    api 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
+}

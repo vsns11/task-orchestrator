@@ -1,0 +1,37 @@
+// Integration tests module — uses Testcontainers for PostgreSQL and Kafka.
+// Depends on local-dev which already wires app + all mocks + demo trigger.
+
+plugins {
+    id 'org.springframework.boot' apply false
+}
+
+dependencies {
+    // local-dev wires app + all mocks + demo trigger
+    testImplementation project(':local-dev')
+    // Direct access to model classes (entities, DTOs, domain) for assertions
+    testImplementation project(':task-orchestrator-model')
+    testImplementation project(':task-orchestrator-app')
+
+    // Spring Boot test support
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.boot:spring-boot-starter-web'
+    testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    testImplementation 'org.springframework.kafka:spring-kafka'
+
+    // Testcontainers for real PostgreSQL and Kafka
+    testImplementation "org.testcontainers:testcontainers:${rootProject.property('testcontainersVersion')}"
+    testImplementation "org.testcontainers:junit-jupiter:${rootProject.property('testcontainersVersion')}"
+    testImplementation "org.testcontainers:kafka:${rootProject.property('testcontainersVersion')}"
+    testImplementation "org.testcontainers:postgresql:${rootProject.property('testcontainersVersion')}"
+
+    // Awaitility for async assertion
+    testImplementation 'org.awaitility:awaitility'
+
+    // Runtime
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    testRuntimeOnly 'org.postgresql:postgresql'
+    testRuntimeOnly 'org.flywaydb:flyway-core'
+    testRuntimeOnly 'org.flywaydb:flyway-database-postgresql'
+    testImplementation "net.bytebuddy:byte-buddy:1.17.5"
+    testImplementation "net.bytebuddy:byte-buddy-agent:1.17.5"
+}

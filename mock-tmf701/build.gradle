@@ -1,0 +1,11 @@
+// Mock TMF-701 processFlow API — standalone HTTP controller
+// Used by integration tests to simulate the external TMF-701 service
+
+plugins {
+    id 'java-library'
+}
+
+dependencies {
+    api project(':task-orchestrator-model')
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+}

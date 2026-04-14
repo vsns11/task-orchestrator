@@ -1,0 +1,17 @@
+// Mock Task Runner — simulates the task-runner service that:
+//   1. Receives task.execute commands from the orchestrator
+//   2. Creates taskFlows on TMF-701, calls downstream, publishes task.event results
+//   3. Receives task.signal from pamconsumer, fetches async results, publishes COMPLETED
+// Depends on mock-pamconsumer to simulate the external async callback flow.
+
+plugins {
+    id 'java-library'
+}
+
+dependencies {
+    api project(':task-orchestrator-model')
+    implementation project(':task-orchestrator-app')
+    implementation project(':mock-pamconsumer')
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.kafka:spring-kafka'
+}

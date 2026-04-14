@@ -1,0 +1,10 @@
+rootProject.name = 'task-orchestrator'
+
+include 'task-orchestrator-model'
+include 'task-orchestrator-app'
+include 'mock-tmf701'
+include 'mock-action-registry'
+include 'mock-pamconsumer'
+include 'mock-task-runner'
+include 'local-dev'
+include 'integration-tests'

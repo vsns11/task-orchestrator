@@ -1,0 +1,11 @@
+// Mock Action Registry API — returns hardcoded action definitions
+// Used by integration tests to simulate the external action-code registry
+
+plugins {
+    id 'java-library'
+}
+
+dependencies {
+    api project(':task-orchestrator-model')
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+}

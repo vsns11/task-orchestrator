@@ -1,0 +1,17 @@
+dagKey: Auto_Remediation
+match:
+  processFlowSpecification: Auto_Remediation
+batches:
+  - index: 0
+    actions:
+      - actionName: runVoiceDiagnostic
+        executionMode: ASYNC
+      - actionName: runInternetCheck
+        executionMode: SYNC
+  - index: 1
+    actions:
+      - actionName: sendNotification
+        executionMode: SYNC
+        dependsOn:
+          - runVoiceDiagnostic
+          - runInternetCheck

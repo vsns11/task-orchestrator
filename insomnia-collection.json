@@ -1,0 +1,209 @@
+{
+  "_type": "export",
+  "__export_format": 4,
+  "__export_date": "2026-04-15T00:00:00.000Z",
+  "__export_source": "insomnia.importers:v0.1.0",
+  "resources": [
+    {
+      "_id": "wrk_orchestrator",
+      "_type": "workspace",
+      "name": "Task Orchestrator E2E",
+      "description": "Run Steps 0-5 in order. Copy processFlowId from Step 1 into the environment variable.",
+      "scope": "collection"
+    },
+    {
+      "_id": "env_base",
+      "_type": "environment",
+      "parentId": "wrk_orchestrator",
+      "name": "Local Dev",
+      "data": {
+        "base_url": "http://localhost:8080",
+        "process_flow_id": "PASTE_FROM_STEP_1",
+        "task_flow_id": "PASTE_FROM_STEP_3",
+        "downstream_txn_id": "PASTE_FROM_STEP_3"
+      }
+    },
+    {
+      "_id": "fld_e2e",
+      "_type": "request_group",
+      "parentId": "wrk_orchestrator",
+      "name": "E2E Flow (run in order)"
+    },
+    {
+      "_id": "fld_signal",
+      "_type": "request_group",
+      "parentId": "wrk_orchestrator",
+      "name": "Manual Signal Injection"
+    },
+    {
+      "_id": "fld_verify",
+      "_type": "request_group",
+      "parentId": "wrk_orchestrator",
+      "name": "Verification"
+    },
+    {
+      "_id": "fld_mock",
+      "_type": "request_group",
+      "parentId": "wrk_orchestrator",
+      "name": "Mock Services"
+    },
+    {
+      "_id": "fld_health",
+      "_type": "request_group",
+      "parentId": "wrk_orchestrator",
+      "name": "Health"
+    },
+
+    {
+      "_id": "req_00",
+      "_type": "request",
+      "parentId": "fld_e2e",
+      "name": "Step 0 — Health Check",
+      "description": "Verify the app is running.\n\nExpected: {\"status\": \"UP\"}",
+      "method": "GET",
+      "url": "{{ _.base_url }}/actuator/health"
+    },
+    {
+      "_id": "req_01",
+      "_type": "request",
+      "parentId": "fld_e2e",
+      "name": "Step 1 — Start Flow",
+      "description": "Publishes a real TMF-701 processFlow to notification.management.\nFull chain: notification.management → pamconsumer → task.command → orchestrator → task-runner.\n\nAfter running:\n  1. COPY processFlowId → paste into environment\n  2. Wait 5 seconds (ASYNC action auto-completes via mock signal)\n  3. Run Steps 2-5",
+      "method": "POST",
+      "url": "{{ _.base_url }}/demo/start?dagKey=Auto_Remediation"
+    },
+    {
+      "_id": "req_02",
+      "_type": "request",
+      "parentId": "fld_e2e",
+      "name": "Step 2 — Check Barriers",
+      "description": "Expected: 2 rows for your processFlowId\n  batch 0: CLOSED, taskTotal=2, taskCompleted=2\n  batch 1: CLOSED, taskTotal=1, taskCompleted=1",
+      "method": "GET",
+      "url": "{{ _.base_url }}/demo/barriers"
+    },
+    {
+      "_id": "req_03",
+      "_type": "request",
+      "parentId": "fld_e2e",
+      "name": "Step 3 — Check Task Executions",
+      "description": "Expected: 3 rows, all COMPLETED. Each has a unique taskFlowId.\n\n  taskFlowId=tf-xxxx, actionName=runVoiceDiagnostic, batch=0, downstreamId=ASYNC_xxxx\n  taskFlowId=tf-yyyy, actionName=runInternetCheck,   batch=0, downstreamId=null\n  taskFlowId=tf-zzzz, actionName=sendNotification,   batch=1, downstreamId=null\n\nFor manual signal testing: copy taskFlowId + downstreamId from the WAITING task.",
+      "method": "GET",
+      "url": "{{ _.base_url }}/demo/tasks"
+    },
+    {
+      "_id": "req_04",
+      "_type": "request",
+      "parentId": "fld_e2e",
+      "name": "Step 4 — Verify ProcessFlow (taskFlowId + href PATCHed)",
+      "description": "Confirms every taskFlowId was PATCHed onto the processFlow.\n\nExpected:\n  state: completed\n  relatedEntity: exactly 3 entries (one per task, no duplicates)\n    - tf-xxxx / runInternetCheck (PATCHed on COMPLETED)\n    - tf-yyyy / runVoiceDiagnostic (PATCHed on COMPLETED, NOT on WAITING)\n    - tf-zzzz / sendNotification (PATCHed on COMPLETED)\n\nCross-check: tf-ids here must match taskFlowId values in Step 3.",
+      "method": "GET",
+      "url": "{{ _.base_url }}/mock/tmf701/processFlow/{{ _.process_flow_id }}"
+    },
+    {
+      "_id": "req_05a",
+      "_type": "request",
+      "parentId": "fld_e2e",
+      "name": "Step 5a — Verify Action Codes API (/action-codes)",
+      "description": "Returns actionName → actionCode mappings.\nLoaded at startup + reloaded every 24h (configurable).\n\nExpected:\n  runVoiceDiagnostic → VOICE_SERVICE_DIAGNOSTIC\n  runInternetCheck → INTERNET_CHECK\n  sendNotification → NOTIFY_USER",
+      "method": "GET",
+      "url": "{{ _.base_url }}/mock/actionregistry/action-codes"
+    },
+    {
+      "_id": "req_05b",
+      "_type": "request",
+      "parentId": "fld_e2e",
+      "name": "Step 5b — Verify DCX Action Codes API (/dcx-action-codes) (/action-codes)",
+      "description": "Returns actionName → dcxActionCode mappings.\n\nExpected:\n  runVoiceDiagnostic → DCX-VSD-01\n  runInternetCheck → DCX-INT-04\n  sendNotification → DCX-NOT-09",
+      "method": "GET",
+      "url": "{{ _.base_url }}/mock/actionregistry/dcx-action-codes"
+    },
+
+    {
+      "_id": "req_signal",
+      "_type": "request",
+      "parentId": "fld_signal",
+      "name": "POST Inject Signal (complete ASYNC task)",
+      "description": "Manually injects a task.signal to complete an ASYNC task in WAITING status.\n\nHow to use:\n  1. Run POST /demo/start\n  2. Run GET /demo/tasks — find the WAITING task\n  3. Copy its taskFlowId (e.g. tf-31c94387) and downstreamId (e.g. ASYNC_1e4ec1e0-68a)\n  4. Paste them into the environment variables task_flow_id and downstream_txn_id\n  5. Run this request\n\nThe signal goes to task.command → MockTaskRunner picks it up → publishes COMPLETED → orchestrator advances.",
+      "method": "POST",
+      "url": "{{ _.base_url }}/demo/signal?processFlowId={{ _.process_flow_id }}&taskFlowId={{ _.task_flow_id }}&downstreamTransactionId={{ _.downstream_txn_id }}"
+    },
+
+    {
+      "_id": "req_v_barriers",
+      "_type": "request",
+      "parentId": "fld_verify",
+      "name": "GET Barriers (all flows)",
+      "method": "GET",
+      "url": "{{ _.base_url }}/demo/barriers"
+    },
+    {
+      "_id": "req_v_tasks",
+      "_type": "request",
+      "parentId": "fld_verify",
+      "name": "GET Tasks (all flows)",
+      "method": "GET",
+      "url": "{{ _.base_url }}/demo/tasks"
+    },
+    {
+      "_id": "req_v_processflow",
+      "_type": "request",
+      "parentId": "fld_verify",
+      "name": "GET ProcessFlow State (by ID)",
+      "description": "Shows state + relatedEntity list. Verify:\n  1. state = completed\n  2. relatedEntity has 3 entries (one per task)\n  3. Each id/href matches taskFlowId from GET /demo/tasks",
+      "method": "GET",
+      "url": "{{ _.base_url }}/mock/tmf701/processFlow/{{ _.process_flow_id }}"
+    },
+
+    {
+      "_id": "req_m_actions",
+      "_type": "request",
+      "parentId": "fld_mock",
+      "name": "Action Registry — GET action codes",
+      "method": "GET",
+      "url": "{{ _.base_url }}/mock/actionregistry/action-codes"
+    },
+    {
+      "_id": "req_m_dcx",
+      "_type": "request",
+      "parentId": "fld_mock",
+      "name": "Action Registry — GET DCX action codes",
+      "method": "GET",
+      "url": "{{ _.base_url }}/mock/actionregistry/dcx-action-codes"
+    },
+    {
+      "_id": "req_m_patch_state",
+      "_type": "request",
+      "parentId": "fld_mock",
+      "name": "TMF-701 — PATCH state (manual)",
+      "method": "PATCH",
+      "url": "{{ _.base_url }}/mock/tmf701/processFlow/{{ _.process_flow_id }}",
+      "headers": [{ "name": "Content-Type", "value": "application/json" }],
+      "body": { "mimeType": "application/json", "text": "{\n  \"state\": \"completed\"\n}" }
+    },
+    {
+      "_id": "req_m_get_flow",
+      "_type": "request",
+      "parentId": "fld_mock",
+      "name": "TMF-701 — GET processFlow",
+      "method": "GET",
+      "url": "{{ _.base_url }}/mock/tmf701/processFlow/{{ _.process_flow_id }}"
+    },
+
+    {
+      "_id": "req_health",
+      "_type": "request",
+      "parentId": "fld_health",
+      "name": "Health",
+      "method": "GET",
+      "url": "{{ _.base_url }}/actuator/health"
+    },
+    {
+      "_id": "req_info",
+      "_type": "request",
+      "parentId": "fld_health",
+      "name": "Info",
+      "method": "GET",
+      "url": "{{ _.base_url }}/actuator/info"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+// Mock PAM Consumer — simulates the pamconsumer service that:
+//   1. Publishes processFlow.initiated when a matching processFlow is created
+//   2. Publishes task.signal when an external async response arrives
+// Used by integration tests and local dev to drive the orchestrator without
+// the real pamconsumer or notification-management topic.
+
+plugins {
+    id 'java-library'
+}
+
+dependencies {
+    api project(':task-orchestrator-model')
+    implementation project(':task-orchestrator-app')
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.kafka:spring-kafka'
+}

@@ -1,0 +1,45 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '3.3.5' apply false
+    id 'io.spring.dependency-management' version '1.1.6'
+}
+
+subprojects {
+    apply plugin: 'java'
+    apply plugin: 'io.spring.dependency-management'
+
+    group = rootProject.property('group')
+    version = rootProject.property('version')
+
+    java {
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
+    }
+
+    dependencyManagement {
+        imports {
+            mavenBom "org.springframework.boot:spring-boot-dependencies:${rootProject.property('springBootVersion')}"
+        }
+    }
+
+    repositories {
+        mavenCentral()
+    }
+
+    // Lombok available in all modules
+    dependencies {
+        compileOnly "org.projectlombok:lombok:${rootProject.property('lombokVersion')}"
+        annotationProcessor "org.projectlombok:lombok:${rootProject.property('lombokVersion')}"
+        testCompileOnly "org.projectlombok:lombok:${rootProject.property('lombokVersion')}"
+        testAnnotationProcessor "org.projectlombok:lombok:${rootProject.property('lombokVersion')}"
+    }
+
+    // Preserve parameter names for Spring MVC (@RequestParam, @PathVariable)
+    tasks.withType(JavaCompile).configureEach {
+        options.compilerArgs.add('-parameters')
+    }
+
+    tasks.withType(Test).configureEach {
+        useJUnitPlatform()
+    }
+}

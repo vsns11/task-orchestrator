@@ -1,0 +1,82 @@
+spring:
+  application:
+    name: task-orchestrator
+
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5433}/orchestrator
+    username: ${POSTGRES_USER:orchestrator}
+    password: ${POSTGRES_PASSWORD:orchestrator}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate.jdbc.time_zone: UTC
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+    consumer:
+      group-id: task-orchestrator
+      # 'latest' in production — only process new messages, skip old ones.
+      # Tests override this to 'earliest' so they can read messages published
+      # before the consumer group was registered.
+      auto-offset-reset: latest
+      enable-auto-commit: false
+    producer:
+      acks: all
+      properties:
+        enable.idempotence: true
+    listener:
+      ack-mode: MANUAL_IMMEDIATE
+      concurrency: 3
+    admin:
+      auto-create: true
+
+orchestrator:
+  topics:
+    task-command: task.command
+    notification-management: notification.management
+  dag:
+    location: classpath:dag/
+  tmf701:
+    base-url: http://localhost:8080/mock/tmf701
+  actionregistry:
+    base-url: http://localhost:8080/mock/actionregistry
+    action-codes-path: /action-codes
+    dcx-action-codes-path: /dcx-action-codes
+    reload-cron: "0 0 2 * * *"
+
+# Task-runner retry config for downstream HTTP calls.
+# These settings are used by the task-runner (not the orchestrator).
+# The orchestrator never retries HTTP calls — it just logs and moves on.
+task-runner:
+  retry:
+    max-attempts: 3
+    backoff-ms: 1000
+    retryable-status-codes:
+      - 502
+      - 503
+      - 504
+      - 429
+
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+logging:
+  level:
+    ca.siva.orchestrator: INFO
+    org.apache.kafka: WARN
+    org.springframework.kafka: WARN
