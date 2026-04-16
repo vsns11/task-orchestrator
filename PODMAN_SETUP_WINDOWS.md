@@ -111,6 +111,110 @@ podman ps
 podman compose version
 ```
 
+If the last command errors with **`looking up compose provider failed`**,
+continue to Part 3.5 below — you need to install a compose provider first.
+
+---
+
+## Part 3.5 — Install a Compose provider (Windows only)
+
+Heads-up: `podman compose` (space) is a **dispatcher**, not a compose
+implementation. On Windows, Podman Desktop does NOT bundle one by default,
+so you have to install one. Pick ONE of the three options below.
+
+### Option A — Podman Desktop "Compose" extension (recommended, no Python)
+
+1. Open **Podman Desktop**.
+2. Left sidebar → **Settings** → **Extensions**.
+3. Find **Compose** → **Install**.
+4. Restart Podman Desktop.
+5. ⚠ **The extension does NOT add the binary to your PATH.** You must
+   do it yourself — see the "Compose extension is active but CLI
+   can't find it" entry in the Troubleshooting section below.
+6. Verify (in a NEW PowerShell window after fixing PATH):
+   ```powershell
+   docker-compose --version
+   podman compose version
+   ```
+
+### Option B — Python `podman-compose`
+
+```powershell
+# Make sure Python is present
+python --version   # if missing:  winget install Python.Python.3.12
+
+# Install podman-compose under your user
+python -m pip install --user podman-compose
+
+# Ensure the install dir is on PATH. pip prints a warning like:
+#   "The script podman-compose is installed in
+#    'C:\Users\<you>\AppData\Roaming\Python\Python312\Scripts'
+#    which is not on PATH."
+# Add that folder to PATH (System Properties → Environment Variables → PATH),
+# open a NEW PowerShell window, then verify:
+
+podman-compose --version
+```
+
+Either `podman compose -f podman-compose.yml ...` or
+`podman-compose -f podman-compose.yml ...` will now work.
+
+### Option C — Standalone `docker-compose.exe` from the official release
+
+Single-file download, no installer, no Python, no extensions. Most
+reliable on Windows once the Podman Desktop Compose extension misbehaves.
+
+```powershell
+# Folder for user-local binaries
+$bin = "$env:USERPROFILE\bin"
+New-Item -ItemType Directory -Force -Path $bin | Out-Null
+
+# Official Docker Compose standalone (Windows x86_64, latest)
+$uri = "https://github.com/docker/compose/releases/latest/download/docker-compose-windows-x86_64.exe"
+Invoke-WebRequest -Uri $uri -OutFile "$bin\docker-compose.exe"
+
+# Add to User PATH
+$current = [Environment]::GetEnvironmentVariable("Path", "User")
+if ($current -notlike "*$bin*") {
+    [Environment]::SetEnvironmentVariable("Path", "$current;$bin", "User")
+}
+```
+
+Close and reopen PowerShell, then `podman compose -f podman-compose.yml up -d`
+works.
+
+### Option D — Docker Desktop is already installed
+
+If Docker Desktop is installed and running, its `docker compose` plugin
+is auto-picked up by `podman compose` as the provider. Nothing extra to
+do on top.
+
+### Option E — No compose tool at all (script in this repo)
+
+If you have Podman Desktop and don't want to install Python, the Compose
+extension, or anything else, use `podman-run-infra.ps1` at the repo
+root. It starts the same two containers as `podman-compose.yml` using
+plain `podman run` commands:
+
+```powershell
+cd path\to\task-orchestrator
+.\podman-run-infra.ps1 up          # start postgres + kafka
+.\podman-run-infra.ps1 status      # list the containers
+.\podman-run-infra.ps1 logs        # tail both logs
+.\podman-run-infra.ps1 down        # stop and remove
+```
+
+This completely bypasses `podman compose`, the Compose extension, and
+`podman-compose` — you only need `podman` itself on PATH.
+
+### Verify (after any option)
+
+```powershell
+podman compose version                        # prints a version, not an error
+podman compose -f podman-compose.yml up -d    # starts postgres + kafka
+podman ps                                     # should show 2 containers
+```
+
 ---
 
 ## Part 4 — Run the Task Orchestrator
@@ -262,6 +366,79 @@ netstat -ano | findstr :9092
 # Kill the process
 taskkill /PID <pid> /F
 ```
+
+### `looking up compose provider failed` (running `podman compose ...`)
+
+`podman compose` (space) is a **dispatcher**, not a compose implementation.
+It looks for one of these providers, in order: `docker compose` plugin,
+`docker-compose.exe`, `podman-compose`. If none are installed — or if
+one is installed but not on PATH — you hit this error.
+
+**Fix:** install a provider — see **Part 3.5 — Install a Compose provider**.
+The quickest path on Windows is the Podman Desktop "Compose" extension
+(Settings → Extensions → Compose → Install). Note the extension alone is
+NOT enough — see the next entry.
+
+### Compose extension is **Active** in Podman Desktop but CLI still can't find it
+
+This is the common Windows gotcha: the extension downloads
+`docker-compose.exe` into its own storage folder under `%APPDATA%` but
+does NOT add that folder to your PATH. `podman compose` still reports
+`looking up compose provider failed` and `docker-compose --version`
+returns "not recognized".
+
+Find where the extension put the binary:
+
+```powershell
+Get-ChildItem -Path $env:APPDATA,$env:LOCALAPPDATA `
+    -Recurse -Filter "docker-compose.exe" -ErrorAction SilentlyContinue |
+  Select-Object FullName
+```
+
+Typical result:
+```
+C:\Users\<you>\AppData\Roaming\Podman Desktop\extensions-storage\compose\bin\docker-compose.exe
+```
+
+Append that folder to your User PATH (once, persists across restarts):
+
+```powershell
+$bin = "C:\Users\<you>\AppData\Roaming\Podman Desktop\extensions-storage\compose\bin"
+$current = [Environment]::GetEnvironmentVariable("Path", "User")
+if ($current -notlike "*$bin*") {
+    [Environment]::SetEnvironmentVariable("Path", "$current;$bin", "User")
+}
+```
+
+Close and reopen PowerShell (PATH is read at shell startup). Then:
+
+```powershell
+docker-compose --version            # prints a version
+podman compose version              # dispatcher now finds the provider
+podman compose -f podman-compose.yml up -d
+```
+
+If you don't want to manage PATH at all, use **Option B** in Part 3.5
+(`pip install --user podman-compose`) instead — fewer moving parts.
+
+### `'podman-compose' is not recognized` / `executable file not found in %PATH%`
+
+You typed `podman-compose` (hyphen — the separate Python tool) but it
+isn't installed. Two clean options:
+
+1. Use the dispatcher instead, after installing a provider per Part 3.5:
+   ```powershell
+   podman compose -f podman-compose.yml up -d
+   ```
+2. Install the Python tool itself and add its folder to `PATH`:
+   ```powershell
+   python -m pip install --user podman-compose
+   podman-compose -f podman-compose.yml up -d
+   ```
+
+`podman compose` (space) and `podman-compose` (hyphen) are different
+binaries. Every command in this doc and in the project's `Makefile` uses
+the space form.
 
 ### "Cannot connect to Podman" in Testcontainers
 

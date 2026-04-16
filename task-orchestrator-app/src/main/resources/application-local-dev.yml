@@ -15,6 +15,16 @@ spring:
   # Re-enable Flyway ONLY for local dev. Production and staging are
   # migrated by Terraform; the app should start against an already
   # migrated database.
+  #
+  # baseline-on-migrate=true lets Flyway co-exist with a schema that was
+  # pre-seeded by the Postgres container (podman/docker-compose mount
+  # V1__init.sql into /docker-entrypoint-initdb.d). On first app boot
+  # against a pre-seeded DB, Flyway sees the tables, creates its
+  # flyway_schema_history at baseline version=1, and treats V1 as
+  # already-applied. Future migrations (V2+) run normally. If the DB
+  # starts empty (no compose seed), Flyway runs V1 itself as usual.
   flyway:
     enabled: true
     locations: classpath:db/migration
+    baseline-on-migrate: true
+    baseline-version: 1
