@@ -11,6 +11,8 @@ import ca.siva.orchestrator.dto.TaskCommand.Action;
 import ca.siva.orchestrator.dto.TaskCommand.AwaitingSignal;
 import ca.siva.orchestrator.dto.TaskCommand.Batch;
 import ca.siva.orchestrator.dto.TaskCommand.Execution;
+import ca.siva.orchestrator.dto.tmf.ProcessFlow;
+import ca.siva.orchestrator.dto.tmf.TaskFlow;
 import ca.siva.orchestrator.kafka.TaskCommandFactory;
 import ca.siva.orchestrator.kafka.TaskCommandPublisher;
 import ca.siva.orchestrator.mock.pamconsumer.MockPamConsumer;
@@ -24,7 +26,10 @@ import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -47,6 +52,9 @@ public class MockTaskRunner {
     private static final String TYPE_TASK_FLOW = "TaskFlow";
     private static final String STATUS_COMPLETED = "COMPLETED";
     private static final String STATUS_WAITING = "WAITING";
+    /** TMF-701 taskFlow lifecycle states written into {@code taskFlowResponse.state}. */
+    private static final String STATE_COMPLETED    = "completed";
+    private static final String STATE_ACKNOWLEDGED = "acknowledged";
     private static final String UNKNOWN = "unknown";
 
     private final TaskCommandPublisher publisher;
@@ -105,7 +113,15 @@ public class MockTaskRunner {
             String downstreamHref = "http://mock-downstream/queries/" + downstreamId;
             ActionResponse waitingResult = ActionResponse.builder()
                     .name(actionName).code(actionCode).id(taskFlowId).type(TYPE_TASK_FLOW)
-                    .taskFlowResult(Map.of("id", taskFlowId, "href", taskFlowHref))
+                    // No downstream payload yet — the task is just acknowledged and waiting.
+                    // taskFlowResponse carries the id/href so the orchestrator can still
+                    // PATCH the parent processFlow.
+                    .taskFlowResponse(TaskFlow.builder()
+                            .id(taskFlowId)
+                            .href(taskFlowHref)
+                            .type(TYPE_TASK_FLOW)
+                            .state(STATE_ACKNOWLEDGED)
+                            .build())
                     .taskStatusCode(STATUS_WAITING)
                     .build();
             publishWaiting(taskCommand, downstreamId, waitingResult);
@@ -190,8 +206,16 @@ public class MockTaskRunner {
     /**
      * Builds an {@link ActionResponse} for a task.event.
      *
-     * <p>Maps the downstream call result into the ActionResponse structure,
-     * including taskFlow metadata and the full action response from downstream.</p>
+     * <p>Shape of each field:</p>
+     * <ul>
+     *   <li>{@code taskResult} — raw downstream response as-is (here a
+     *       {@code Map<String,Object>}; in production this is typically a
+     *       {@code JsonNode} or a domain DTO deserialized from the downstream
+     *       HTTP/Kafka response).</li>
+     *   <li>{@code taskFlowResponse} — typed TMF-701 {@link TaskFlow}; domain outputs
+     *       ({@code outcome}, {@code diagnosticSummary}, …) are emitted as
+     *       {@link ProcessFlow.Characteristic} name/value pairs per TMF convention.</li>
+     * </ul>
      */
     private static ActionResponse buildActionResponse(String actionName, String actionCode,
                                                        String taskFlowId, String taskFlowHref,
@@ -202,13 +226,38 @@ public class MockTaskRunner {
                 .code(actionCode)
                 .id(taskFlowId)
                 .type(TYPE_TASK_FLOW)
-                .taskFlowResult(Map.of(
-                        "id", taskFlowId,
-                        "href", taskFlowHref
-                ))
-                .taskFlowResponse(downstreamResult)
+                .taskResult(downstreamResult)
+                .taskFlowResponse(TaskFlow.builder()
+                        .id(taskFlowId)
+                        .href(taskFlowHref)
+                        .type(TYPE_TASK_FLOW)
+                        .state(STATE_COMPLETED)
+                        .characteristic(toCharacteristics(downstreamResult))
+                        .build())
                 .taskStatusCode(taskStatusCode)
                 .build();
+    }
+
+    /**
+     * Flattens a downstream result map into TMF-701 {@link ProcessFlow.Characteristic}
+     * entries. Preserves insertion order and stringifies values — matching the
+     * TMF convention that characteristic values are strings with an optional
+     * {@code valueType}.
+     */
+    private static List<ProcessFlow.Characteristic> toCharacteristics(Map<String, Object> downstreamResult) {
+        if (downstreamResult == null || downstreamResult.isEmpty()) {
+            return List.of();
+        }
+        List<ProcessFlow.Characteristic> out = new ArrayList<>(downstreamResult.size());
+        for (Entry<String, Object> e : downstreamResult.entrySet()) {
+            Object v = e.getValue();
+            out.add(ProcessFlow.Characteristic.builder()
+                    .name(e.getKey())
+                    .value(v == null ? null : v.toString())
+                    .valueType(v == null ? null : v.getClass().getSimpleName())
+                    .build());
+        }
+        return out;
     }
 
     // ---- helpers ----

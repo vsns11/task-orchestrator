@@ -1,0 +1,38 @@
+{
+  "eventId": "d1d1d1d1-aaaa-4bbb-8ccc-000000000004",
+  "correlationId": "11111111-aaaa-4bbb-8ccc-000000000001",
+  "schemaVersion": "1.0",
+  "eventTime": "2026-04-15T14:00:00.500Z",
+  "messageType": "EVENT",
+  "messageName": "task.event",
+  "source": "task-runner",
+  "status": "WAITING",
+  "action": {
+    "actionName": "passwordPushV2",
+    "actionCode": "PASSWORD_PUSH_V2",
+    "dcxActionCode": "DCX-PWP-01"
+  },
+  "batch": {
+    "index": 0
+  },
+  "execution": {
+    "mode": "ASYNC",
+    "startedAt": "2026-04-15T14:00:00.500Z"
+  },
+  "awaitingSignal": {
+    "downstreamTransactionId": "ASYNC-PWP-1e4ec1e0-68a"
+  },
+  "result": {
+    "name": "passwordPushV2",
+    "code": "PASSWORD_PUSH_V2",
+    "id": "tf-pwp-a1",
+    "type": "TaskFlow",
+    "taskFlowResponse": {
+      "id": "tf-pwp-a1",
+      "href": "https://tmf-process-flow.example.com/tmf-api/processFlowManagement/v4/processFlow/11111111-aaaa-4bbb-8ccc-000000000001/taskFlow/tf-pwp-a1",
+      "@type": "TaskFlow",
+      "state": "acknowledged"
+    },
+    "taskStatusCode": "WAITING"
+  }
+}

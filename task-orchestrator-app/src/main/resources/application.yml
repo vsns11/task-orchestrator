@@ -4,7 +4,7 @@
 # Profile-based config files (activated via JVM arg -Dspring.profiles.active):
 #   application-db.yml            - PostgreSQL, JPA, Flyway
 #   application-kafka.yml         - Kafka broker, topics
-#   application-orchestration.yml - DAG, TMF-701, action-registry, task-runner retry
+#   application-orchestration.yml - DAG, TMF-701, action-registry
 #
 # Example: java -Dspring.profiles.active=db,kafka,orchestration -jar app.jar
 # ===================================================================
@@ -12,10 +12,6 @@
 spring:
   application:
     name: task-orchestrator
-  lifecycle:
-    # On SIGTERM, stop accepting new requests and wait up to 30s for in-flight work
-    # (Kafka consumers, HTTP requests, DB transactions) to complete before forcing shutdown.
-    timeout-per-shutdown-phase: 30s
 
 server:
   port: 8080
@@ -24,20 +20,35 @@ server:
 management:
   endpoints:
     web:
+      # Only expose the minimum set needed by ops + Kubernetes probes.
+      # /actuator/health/liveness and /actuator/health/readiness are the
+      # canonical probe endpoints; /livez and /readyz below are aliases.
       exposure:
-        include: health,info,metrics,prometheus
+        include: health, info, metrics, prometheus
   endpoint:
     health:
-      # Expose component details so monitoring can distinguish db-down vs kafka-down
-      show-details: always
-      show-components: always
+      # Hide component breakdowns from unauthenticated callers (e.g. anyone
+      # who can hit /actuator/health). Internal tooling with auth still sees
+      # full detail. Use "always" only if the management port is isolated.
+      show-details: when-authorized
+      show-components: when-authorized
       probes:
+        # Exposes /actuator/health/liveness and /actuator/health/readiness.
         enabled: true
+        # Adds Kubernetes-style shortcuts: /livez and /readyz.
+        add-additional-paths: true
       group:
-        # Kubernetes liveness: is the JVM alive? Only fails on deadlock/OOM.
+        # Liveness: "is the JVM alive?" — MUST NOT depend on external systems,
+        # otherwise a Kafka blip or DB failover would make Kubernetes kill
+        # the pod. Only livenessState (trips on OutOfMemoryError / deadlock).
         liveness:
           include: livenessState
-        # Kubernetes readiness: can we accept traffic? Includes db + kafka + custom indicators.
+        # Readiness: "can this pod accept traffic right now?" — aggregates
+        # everything we need at steady state: DB reachable, Kafka reachable,
+        # and the two startup registries are populated. The registry names
+        # below are the suffix-stripped bean names registered by
+        # RegistryHealthIndicators (actionRegistryHealthIndicator ->
+        # actionRegistry; dagRegistryHealthIndicator -> dagRegistry).
         readiness:
           include: readinessState, db, kafka, actionRegistry, dagRegistry
   health:
@@ -45,6 +56,11 @@ management:
       enabled: true
     readinessState:
       enabled: true
+    # Disk space checks flip the overall health status to DOWN on low disk,
+    # which would make the pod un-ready even when everything it needs to
+    # serve traffic is fine. Monitor disk via the platform, not the probe.
+    diskspace:
+      enabled: false
 
 logging:
   level:

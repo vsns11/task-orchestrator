@@ -1,0 +1,32 @@
+{
+  "eventId": "f2f2f2f2-bbbb-4ccc-8ddd-000000000006",
+  "correlationId": "22222222-bbbb-4ccc-8ddd-000000000001",
+  "schemaVersion": "1.0",
+  "eventTime": "2026-04-15T14:05:02.950Z",
+  "messageType": "SIGNAL",
+  "messageName": "task.signal",
+  "source": "pamconsumer",
+  "task": {
+    "id": "tf-pwr-b1",
+    "href": "https://tmf-process-flow.example.com/tmf-api/processFlowManagement/v4/processFlow/22222222-bbbb-4ccc-8ddd-000000000001/taskFlow/tf-pwr-b1"
+  },
+  "action": {
+    "actionName": "passwordResetV2",
+    "actionCode": "PASSWORD_RESET_V2",
+    "dcxActionCode": "DCX-PWR-01"
+  },
+  "batch": {
+    "index": 0
+  },
+  "inputs": {
+    "downstream": {
+      "id":   "ASYNC-PWR-5f7d9c3b-21c",
+      "href": "https://credential-store.example.com/resetRequests/PWR-TXN-2026-04-15-0001/result"
+    }
+  },
+  "trigger": {
+    "externalEventId": "e2e2e2e2-bbbb-4ccc-8ddd-000000000005",
+    "externalType":    "TaskFinalAsyncResponseSend",
+    "reportingSystem": "ACUT"
+  }
+}

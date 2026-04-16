@@ -1,0 +1,22 @@
+{
+  "eventId": "b5b5b5b5-cccc-4ddd-8eee-000000000002",
+  "correlationId": "33333333-cccc-4ddd-8eee-000000000001",
+  "schemaVersion": "1.0",
+  "eventTime": "2026-04-15T14:10:00.200Z",
+  "messageType": "EVENT",
+  "messageName": "processFlow.initiated",
+  "source": "pamconsumer",
+  "dagKey": "miscellaneous",
+  "inputs": {
+    "processFlow": {
+      "id": "33333333-cccc-4ddd-8eee-000000000001",
+      "href": "https://tmf-process-flow.example.com/tmf-api/processFlowManagement/v4/processFlow/33333333-cccc-4ddd-8eee-000000000001",
+      "@type": "processFlow",
+      "state": "active",
+      "processFlowSpecification": "miscellaneous",
+      "characteristic": [
+        { "id": "CTX-001", "name": "context", "value": "manual-ops-run", "valueType": "string" }
+      ]
+    }
+  }
+}

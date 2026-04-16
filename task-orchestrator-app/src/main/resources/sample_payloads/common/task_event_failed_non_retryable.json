@@ -1,0 +1,46 @@
+{
+  "eventId": "f9f9f9f9-dddd-4eee-8fff-000000000001",
+  "correlationId": "11111111-aaaa-4bbb-8ccc-000000000001",
+  "schemaVersion": "1.0",
+  "eventTime": "2026-04-15T14:00:01.500Z",
+  "messageType": "EVENT",
+  "messageName": "task.event",
+  "source": "task-runner",
+  "status": "FAILED",
+  "action": {
+    "actionName": "passwordPushV2",
+    "actionCode": "PASSWORD_PUSH_V2",
+    "dcxActionCode": "DCX-PWP-01"
+  },
+  "batch": {
+    "index": 0
+  },
+  "execution": {
+    "mode": "ASYNC",
+    "startedAt": "2026-04-15T14:00:00.500Z",
+    "finishedAt": "2026-04-15T14:00:01.500Z",
+    "durationMs": 1000
+  },
+  "result": {
+    "name": "passwordPushV2",
+    "code": "PASSWORD_PUSH_V2",
+    "id": "tf-pwp-a1",
+    "type": "TaskFlow",
+    "taskFlowResponse": {
+      "id": "tf-pwp-a1",
+      "href": "https://tmf-process-flow.example.com/tmf-api/processFlowManagement/v4/processFlow/11111111-aaaa-4bbb-8ccc-000000000001/taskFlow/tf-pwp-a1",
+      "@type": "TaskFlow",
+      "state": "failed"
+    },
+    "taskStatusCode": "FAILED"
+  },
+  "error": {
+    "code": "DOWNSTREAM_PERMISSION_DENIED",
+    "message": "Credential store rejected the push: target account is locked",
+    "retryable": false,
+    "details": {
+      "httpStatus": 403,
+      "downstreamUrl": "https://credential-store.example.com/pushRequests/PWP-TXN-2026-04-15-0001"
+    }
+  }
+}

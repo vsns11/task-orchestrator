@@ -1,0 +1,11 @@
+{
+  "eventId": "b6b6b6b6-cccc-4ddd-8eee-00000000005a",
+  "correlationId": "33333333-cccc-4ddd-8eee-000000000001",
+  "schemaVersion": "1.0",
+  "eventTime": "2026-04-15T14:10:00.260Z",
+  "messageType": "EVENT",
+  "messageName": "flow.lifecycle",
+  "source": "task-orchestrator",
+  "dagKey": "miscellaneous",
+  "status": "INITIAL"
+}

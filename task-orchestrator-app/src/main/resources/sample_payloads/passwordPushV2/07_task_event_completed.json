@@ -1,0 +1,48 @@
+{
+  "eventId": "a2a2a2a2-aaaa-4bbb-8ccc-000000000007",
+  "correlationId": "11111111-aaaa-4bbb-8ccc-000000000001",
+  "schemaVersion": "1.0",
+  "eventTime": "2026-04-15T14:00:01.700Z",
+  "messageType": "EVENT",
+  "messageName": "task.event",
+  "source": "task-runner",
+  "status": "COMPLETED",
+  "action": {
+    "actionName": "passwordPushV2",
+    "actionCode": "PASSWORD_PUSH_V2",
+    "dcxActionCode": "DCX-PWP-01"
+  },
+  "batch": {
+    "index": 0
+  },
+  "execution": {
+    "mode": "ASYNC",
+    "startedAt": "2026-04-15T14:00:00.500Z",
+    "finishedAt": "2026-04-15T14:00:01.700Z",
+    "durationMs": 1200
+  },
+  "result": {
+    "name": "passwordPushV2",
+    "code": "PASSWORD_PUSH_V2",
+    "id": "tf-pwp-a1",
+    "type": "TaskFlow",
+    "taskResult": {
+      "outcome": "PASS",
+      "pushedAt": "2026-04-15T14:00:01.650Z",
+      "targetSystem": "active-directory",
+      "userId": "user-00123"
+    },
+    "taskFlowResponse": {
+      "id": "tf-pwp-a1",
+      "href": "https://tmf-process-flow.example.com/tmf-api/processFlowManagement/v4/processFlow/11111111-aaaa-4bbb-8ccc-000000000001/taskFlow/tf-pwp-a1",
+      "@type": "TaskFlow",
+      "state": "completed",
+      "characteristic": [
+        { "name": "outcome",      "value": "PASS",               "valueType": "String" },
+        { "name": "targetSystem", "value": "active-directory",   "valueType": "String" },
+        { "name": "userId",       "value": "user-00123",         "valueType": "String" }
+      ]
+    },
+    "taskStatusCode": "COMPLETED"
+  }
+}

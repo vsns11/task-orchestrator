@@ -38,18 +38,5 @@ services:
       postgres:
         condition: service_healthy
 
-  # Browser-based Kafka UI — view topics, messages, consumer groups
-  # Open http://localhost:9091 after 'make docker-up'
-  kafka-ui:
-    image: provectuslabs/kafka-ui:latest
-    container_name: orchestrator-kafka-ui
-    ports:
-      - "9091:8080"
-    environment:
-      KAFKA_CLUSTERS_0_NAME: orchestrator-local
-      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
-    depends_on:
-      - kafka
-
 volumes:
   pgdata:

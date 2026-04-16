@@ -1,0 +1,46 @@
+{
+  "eventId": "d5d5d5d5-cccc-4ddd-8eee-000000000004",
+  "correlationId": "33333333-cccc-4ddd-8eee-000000000001",
+  "schemaVersion": "1.0",
+  "eventTime": "2026-04-15T14:10:00.650Z",
+  "messageType": "EVENT",
+  "messageName": "task.event",
+  "source": "task-runner",
+  "status": "COMPLETED",
+  "action": {
+    "actionName": "miscellaneous",
+    "actionCode": "MISCELLANEOUS",
+    "dcxActionCode": "DCX-MISC-01"
+  },
+  "batch": {
+    "index": 0
+  },
+  "execution": {
+    "mode": "SYNC",
+    "startedAt": "2026-04-15T14:10:00.300Z",
+    "finishedAt": "2026-04-15T14:10:00.650Z",
+    "durationMs": 350
+  },
+  "result": {
+    "name": "miscellaneous",
+    "code": "MISCELLANEOUS",
+    "id": "tf-misc-c1",
+    "type": "TaskFlow",
+    "taskResult": {
+      "outcome": "PASS",
+      "processedAt": "2026-04-15T14:10:00.640Z",
+      "context": "manual-ops-run"
+    },
+    "taskFlowResponse": {
+      "id": "tf-misc-c1",
+      "href": "https://tmf-process-flow.example.com/tmf-api/processFlowManagement/v4/processFlow/33333333-cccc-4ddd-8eee-000000000001/taskFlow/tf-misc-c1",
+      "@type": "TaskFlow",
+      "state": "completed",
+      "characteristic": [
+        { "name": "outcome", "value": "PASS",            "valueType": "String" },
+        { "name": "context", "value": "manual-ops-run",  "valueType": "String" }
+      ]
+    },
+    "taskStatusCode": "COMPLETED"
+  }
+}

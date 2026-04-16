@@ -1,0 +1,32 @@
+{
+  "eventId": "c1c1c1c1-aaaa-4bbb-8ccc-000000000003",
+  "correlationId": "11111111-aaaa-4bbb-8ccc-000000000001",
+  "schemaVersion": "1.0",
+  "eventTime": "2026-04-15T14:00:00.250Z",
+  "messageType": "COMMAND",
+  "messageName": "task.execute",
+  "source": "task-orchestrator",
+  "dagKey": "passwordPushV2",
+  "intent": "EXECUTE",
+  "action": {
+    "actionName": "passwordPushV2",
+    "actionCode": "PASSWORD_PUSH_V2",
+    "dcxActionCode": "DCX-PWP-01"
+  },
+  "batch": {
+    "index": 0,
+    "total": 1
+  },
+  "execution": {
+    "mode": "ASYNC"
+  },
+  "inputs": {
+    "processFlow": {
+      "@type": "processFlow",
+      "id": "11111111-aaaa-4bbb-8ccc-000000000001",
+      "href": "https://tmf-process-flow.example.com/tmf-api/processFlowManagement/v4/processFlow/11111111-aaaa-4bbb-8ccc-000000000001",
+      "state": "active",
+      "processFlowSpecification": "passwordPushV2"
+    }
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "eventId": "f1f1f1f1-aaaa-4bbb-8ccc-000000000006",
+  "correlationId": "11111111-aaaa-4bbb-8ccc-000000000001",
+  "schemaVersion": "1.0",
+  "eventTime": "2026-04-15T14:00:01.450Z",
+  "messageType": "SIGNAL",
+  "messageName": "task.signal",
+  "source": "pamconsumer",
+  "task": {
+    "id": "tf-pwp-a1",
+    "href": "https://tmf-process-flow.example.com/tmf-api/processFlowManagement/v4/processFlow/11111111-aaaa-4bbb-8ccc-000000000001/taskFlow/tf-pwp-a1"
+  },
+  "action": {
+    "actionName": "passwordPushV2",
+    "actionCode": "PASSWORD_PUSH_V2",
+    "dcxActionCode": "DCX-PWP-01"
+  },
+  "batch": {
+    "index": 0
+  },
+  "inputs": {
+    "downstream": {
+      "id":   "ASYNC-PWP-1e4ec1e0-68a",
+      "href": "https://credential-store.example.com/pushRequests/PWP-TXN-2026-04-15-0001/result"
+    }
+  },
+  "trigger": {
+    "externalEventId": "e1e1e1e1-aaaa-4bbb-8ccc-000000000005",
+    "externalType":    "TaskFinalAsyncResponseSend",
+    "reportingSystem": "ACUT"
+  }
+}

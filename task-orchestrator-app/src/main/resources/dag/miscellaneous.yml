@@ -1,0 +1,13 @@
+# Generic single-batch SYNC DAG used as a reference for documentation
+# and demos (sample_payloads/miscellaneous/*). The single action runs
+# synchronously — the task-runner returns COMPLETED in the same call,
+# with no WAITING / signal roundtrip. Use this DAG whenever you need to
+# illustrate the happy-path of a plain SYNC task.
+dagKey: miscellaneous
+match:
+  processFlowSpecification: miscellaneous
+batches:
+  - index: 0
+    actions:
+      - actionName: miscellaneous
+        executionMode: SYNC

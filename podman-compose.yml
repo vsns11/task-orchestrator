@@ -1,10 +1,13 @@
 # Podman-compatible compose file.
-# Usage: podman-compose -f podman-compose.yml up -d
+# Usage: podman compose -f podman-compose.yml up -d
 #
-# Differences from docker-compose.yml:
+# Contains only the two services needed for local development:
+#   - postgres  (orchestrator DB)
+#   - kafka     (task.command / notification.management topics)
+#
+# Differences from a typical docker-compose:
 #   - No depends_on health conditions (podman-compose v1 doesn't support them)
 #   - No container_name (podman generates names automatically)
-#   - Kafka waits via sleep instead of health check dependency
 
 services:
   postgres:
@@ -40,14 +43,6 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
       CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
-
-  kafka-ui:
-    image: docker.io/provectuslabs/kafka-ui:latest
-    ports:
-      - "9091:8080"
-    environment:
-      KAFKA_CLUSTERS_0_NAME: orchestrator-local
-      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
 
 volumes:
   pgdata:

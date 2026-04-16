@@ -28,6 +28,10 @@ spring:
     properties:
       hibernate.jdbc.time_zone: UTC
 
+  # Flyway is DISABLED by default — real environments are provisioned via Terraform,
+  # which owns schema migrations. Local dev and tests re-enable Flyway by activating
+  # the "local-dev" profile (see application-local-dev.yml) or by overriding
+  # spring.flyway.enabled=true (integration tests do this).
   flyway:
-    enabled: true
+    enabled: false
     locations: classpath:db/migration

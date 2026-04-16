@@ -115,26 +115,49 @@ podman compose version
 
 ## Part 4 — Run the Task Orchestrator
 
-### Start infrastructure
+### Start ONLY the infrastructure (Postgres + Kafka, no app)
+
+The compose file contains exactly two services: `postgres` and `kafka`. Starting
+it boots both and nothing else — it does NOT start the orchestrator app or any
+mocks.
 
 ```powershell
 cd path\to\task-orchestrator
 make podman-up
 ```
 
-Or without Make (if Make isn't installed):
+Or without Make (if Make isn't installed), from the repo root:
 
 ```powershell
 podman compose -f podman-compose.yml up -d
 ```
 
-Wait 10 seconds, then verify:
+If you want just one of the two services for some reason:
+
+```powershell
+podman compose -f podman-compose.yml up -d postgres   # just Postgres
+podman compose -f podman-compose.yml up -d kafka      # just Kafka
+```
+
+Wait 10 seconds, then verify both are up:
 
 ```powershell
 podman ps
 ```
 
-You should see 3 containers: postgres, kafka, kafka-ui.
+You should see 2 containers: `postgres` and `kafka`. Connection info:
+
+| Service | Host     | Port  | Credentials                               |
+|---------|----------|-------|-------------------------------------------|
+| Postgres| localhost| 5433  | user `orchestrator` / pass `orchestrator` / db `orchestrator` |
+| Kafka   | localhost| 9092  | PLAINTEXT, no auth                        |
+
+Stop them when you're done:
+
+```powershell
+make podman-down
+# or: podman compose -f podman-compose.yml down
+```
 
 ### Start the app
 
@@ -174,7 +197,6 @@ curl http://localhost:8080/demo/tasks
 
 | Tool | URL |
 |------|-----|
-| Kafka UI | http://localhost:9091 |
 | DBeaver | `localhost:5433` / `orchestrator` / `orchestrator` |
 
 ### Stop everything
@@ -230,7 +252,7 @@ podman machine init --cpus 4 --memory 4096
 podman machine start
 ```
 
-### Port conflict (5433, 9092, or 9091 already in use)
+### Port conflict (5433 or 9092 already in use)
 
 ```powershell
 # Find what's using the port

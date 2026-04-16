@@ -1,0 +1,20 @@
+# ===================================================================
+# Local-Dev Overrides
+# Activated via: -Dspring.profiles.active=...,local-dev
+# ===================================================================
+# Only applied when running locally (LocalDevApplication, ad-hoc dev,
+# or any run that explicitly adds the "local-dev" profile).
+# Real environments do NOT include this profile — Terraform owns schema
+# migrations there.
+
+spring:
+  config:
+    activate:
+      on-profile: local-dev
+
+  # Re-enable Flyway ONLY for local dev. Production and staging are
+  # migrated by Terraform; the app should start against an already
+  # migrated database.
+  flyway:
+    enabled: true
+    locations: classpath:db/migration

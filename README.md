@@ -10,7 +10,7 @@ For the full payload contract, see `FLOW.md`.
 ## Prerequisites
 
 - **Java 21+** — `java -version`
-- **Docker OR Podman** — for PostgreSQL, Kafka, Kafka UI
+- **Docker OR Podman** — for PostgreSQL and Kafka
 - **Gradle** — wrapper included, no install needed
 
 ---
@@ -20,7 +20,7 @@ For the full payload contract, see `FLOW.md`.
 ### Option A: Docker
 
 ```bash
-make docker-up          # start PostgreSQL + Kafka + Kafka UI
+make docker-up          # start PostgreSQL + Kafka
 make run                # start the app (auto-runs docker-up first)
 ```
 
@@ -30,7 +30,7 @@ Install [Podman Desktop](https://podman-desktop.io/) — it includes `podman com
 No Python or pip needed.
 
 ```bash
-make podman-up          # start PostgreSQL + Kafka + Kafka UI
+make podman-up          # start PostgreSQL + Kafka
 make run-podman         # start the app (auto-runs podman-up first)
 ```
 
@@ -109,7 +109,6 @@ make test
 
 | Tool | URL / Connection | What to look at |
 |------|-----------------|-----------------|
-| **Kafka UI** | http://localhost:9091 | Topics, messages, consumer groups, lag |
 | **DBeaver** | `localhost:5433` / `orchestrator` / `orchestrator` | `batch_barrier` and `task_execution` tables |
 | **Insomnia** | Import `insomnia-collection.json` | All HTTP endpoints |
 
@@ -136,8 +135,8 @@ task-orchestrator/
 ├── local-dev/                      Wires app + all mocks for local development
 ├── integration-tests/              E2E tests with Testcontainers
 │
-├── docker-compose.yml              Docker: PostgreSQL + Kafka + Kafka UI
-├── podman-compose.yml              Podman: same services, Podman-compatible
+├── docker-compose.yml              Docker: PostgreSQL + Kafka
+├── podman-compose.yml              Podman: PostgreSQL + Kafka
 └── Makefile                        All commands (make help)
 ```
 

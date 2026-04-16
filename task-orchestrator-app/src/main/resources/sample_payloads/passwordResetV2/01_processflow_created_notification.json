@@ -1,0 +1,24 @@
+{
+  "id": "22222222-bbbb-4ccc-8ddd-000000000001",
+  "href": "https://tmf-process-flow.example.com/tmf-api/processFlowManagement/v4/processFlow/22222222-bbbb-4ccc-8ddd-000000000001",
+  "@type": "processFlow",
+  "state": "active",
+  "@baseType": "processFlow",
+  "channel": [],
+  "relatedParty": [],
+  "relatedEntity": [
+    {
+      "id": "PWR-TXN-2026-04-15-0001",
+      "href": "https://credential-store.example.com/resetRequests/PWR-TXN-2026-04-15-0001",
+      "name": "Password Reset Request",
+      "role": "RelatedEntity",
+      "@type": "RelatedEntity",
+      "@referredType": "PasswordResetRequest"
+    }
+  ],
+  "characteristic": [
+    { "id": "USER-00456", "name": "userId",       "value": "user-00456",      "valueType": "string", "characteristicRelationship": [] },
+    { "id": "TARGET-OKTA","name": "targetSystem", "value": "okta",            "valueType": "string", "characteristicRelationship": [] }
+  ],
+  "processFlowSpecification": "passwordResetV2"
+}

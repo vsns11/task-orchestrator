@@ -36,12 +36,25 @@ public class MockActionRegistryController {
     public List<ActionCodeEntry> actionCodes() {
         log.info("[MOCK action-registry] GET /action-codes");
         return List.of(
+                // Auto_Remediation DAG — multi-batch mixed sync/async
                 new ActionCodeEntry("VOICE_SERVICE_DIAGNOSTIC", "runVoiceDiagnostic",
                         "Run voice service diagnostic", "Auto_Remediation", "action"),
                 new ActionCodeEntry("INTERNET_CHECK", "runInternetCheck",
                         "Run internet connectivity check", "Auto_Remediation", "action"),
                 new ActionCodeEntry("NOTIFY_USER", "sendNotification",
-                        "Send notification to user", "Auto_Remediation", "action")
+                        "Send notification to user", "Auto_Remediation", "action"),
+
+                // passwordPushV2 DAG — single async action
+                new ActionCodeEntry("PASSWORD_PUSH_V2", "passwordPushV2",
+                        "Push a new password to the target credential store", "passwordPushV2", "action"),
+
+                // passwordResetV2 DAG — single async action
+                new ActionCodeEntry("PASSWORD_RESET_V2", "passwordResetV2",
+                        "Reset a user's password in the target credential store", "passwordResetV2", "action"),
+
+                // miscellaneous DAG — single sync action (reference for plain SYNC flows)
+                new ActionCodeEntry("MISCELLANEOUS", "miscellaneous",
+                        "Generic synchronous action used for sample/demo SYNC flows", "miscellaneous", "action")
         );
     }
 
@@ -56,7 +69,11 @@ public class MockActionRegistryController {
         return List.of(
                 new DcxActionCodeEntry("VOICE_SERVICE_DIAGNOSTIC", "Auto_Remediation", "DCX-VSD-01", "action"),
                 new DcxActionCodeEntry("INTERNET_CHECK", "Auto_Remediation", "DCX-INT-04", "action"),
-                new DcxActionCodeEntry("NOTIFY_USER", "Auto_Remediation", "DCX-NOT-09", "action")
+                new DcxActionCodeEntry("NOTIFY_USER", "Auto_Remediation", "DCX-NOT-09", "action"),
+
+                new DcxActionCodeEntry("PASSWORD_PUSH_V2",  "passwordPushV2",  "DCX-PWP-01",  "action"),
+                new DcxActionCodeEntry("PASSWORD_RESET_V2", "passwordResetV2", "DCX-PWR-01",  "action"),
+                new DcxActionCodeEntry("MISCELLANEOUS",     "miscellaneous",   "DCX-MISC-01", "action")
         );
     }
 }

@@ -1,0 +1,32 @@
+{
+  "eventId": "c5c5c5c5-cccc-4ddd-8eee-000000000003",
+  "correlationId": "33333333-cccc-4ddd-8eee-000000000001",
+  "schemaVersion": "1.0",
+  "eventTime": "2026-04-15T14:10:00.250Z",
+  "messageType": "COMMAND",
+  "messageName": "task.execute",
+  "source": "task-orchestrator",
+  "dagKey": "miscellaneous",
+  "intent": "EXECUTE",
+  "action": {
+    "actionName": "miscellaneous",
+    "actionCode": "MISCELLANEOUS",
+    "dcxActionCode": "DCX-MISC-01"
+  },
+  "batch": {
+    "index": 0,
+    "total": 1
+  },
+  "execution": {
+    "mode": "SYNC"
+  },
+  "inputs": {
+    "processFlow": {
+      "@type": "processFlow",
+      "id": "33333333-cccc-4ddd-8eee-000000000001",
+      "href": "https://tmf-process-flow.example.com/tmf-api/processFlowManagement/v4/processFlow/33333333-cccc-4ddd-8eee-000000000001",
+      "state": "active",
+      "processFlowSpecification": "miscellaneous"
+    }
+  }
+}

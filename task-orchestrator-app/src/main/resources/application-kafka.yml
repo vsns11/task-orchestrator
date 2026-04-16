@@ -30,9 +30,6 @@ spring:
     listener:
       ack-mode: MANUAL_IMMEDIATE
       concurrency: ${KAFKA_CONCURRENCY:3}
-      # Topics are provisioned externally by the platform team. Do not abort startup
-      # if a topic is momentarily missing during a deploy — let the consumer retry.
-      missing-topics-fatal: false
 
 # Kafka topic names
 orchestrator:

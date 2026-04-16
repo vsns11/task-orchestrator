@@ -8,6 +8,7 @@ import ca.siva.orchestrator.domain.TaskStatus;
 import ca.siva.orchestrator.dto.ActionResponse;
 import ca.siva.orchestrator.dto.TaskCommand;
 import ca.siva.orchestrator.dto.tmf.ProcessFlow;
+import ca.siva.orchestrator.dto.tmf.TaskFlow;
 import ca.siva.orchestrator.entity.BatchBarrier;
 import ca.siva.orchestrator.entity.BatchBarrierId;
 import ca.siva.orchestrator.entity.TaskExecution;
@@ -54,12 +55,9 @@ public class BarrierService {
     /** ActionResponse taskStatusCode values — anything other than COMPLETED is treated as a failure. */
     private static final String TASK_STATUS_COMPLETED = "COMPLETED";
 
-    /** Expected outcome in taskFlowResponse for a passing action. */
-    private static final String OUTCOME_FIELD = "outcome";
-    private static final String OUTCOME_PASS  = "PASS";
-
-    /** Href key inside taskFlowResult map. */
-    private static final String HREF_FIELD = "href";
+    /** Characteristic name carrying the pass/fail outcome on the TMF-701 TaskFlow response. */
+    private static final String OUTCOME_CHARACTERISTIC = "outcome";
+    private static final String OUTCOME_PASS           = "PASS";
 
     /** Unknown identifier used in log messages when a field is absent. */
     private static final String UNKNOWN = "?";
@@ -406,10 +404,10 @@ public class BarrierService {
             return Optional.of("actionResponse.taskStatusCode=" + taskStatusCode);
         }
 
-        Object taskFlowResponse = result.getTaskFlowResponse();
-        if (taskFlowResponse instanceof Map<?, ?> responseMap) {
-            Object outcome = responseMap.get(OUTCOME_FIELD);
-            if (outcome != null && !OUTCOME_PASS.equalsIgnoreCase(outcome.toString())) {
+        TaskFlow taskFlowResponse = result.getTaskFlowResponse();
+        if (taskFlowResponse != null) {
+            String outcome = taskFlowResponse.findCharacteristic(OUTCOME_CHARACTERISTIC);
+            if (outcome != null && !OUTCOME_PASS.equalsIgnoreCase(outcome)) {
                 return Optional.of("actionResponse.taskFlowResponse.outcome=" + outcome);
             }
         }
@@ -417,13 +415,15 @@ public class BarrierService {
         return Optional.empty();
     }
 
+    /**
+     * Pulls the taskFlow href from the typed TMF-701 {@link TaskFlow} carried
+     * in {@link ActionResponse#getTaskFlowResponse()}. The raw
+     * {@code taskResult} field is intentionally ignored here — it's the
+     * downstream's business payload, not TMF resource metadata.
+     */
     private static String extractTaskFlowHref(ActionResponse result) {
-        Object taskFlowResult = result.getTaskFlowResult();
-        if (taskFlowResult instanceof Map<?, ?> map) {
-            Object href = map.get(HREF_FIELD);
-            return href != null ? href.toString() : "";
-        }
-        return "";
+        TaskFlow tf = result.getTaskFlowResponse();
+        return tf != null && tf.getHref() != null ? tf.getHref() : "";
     }
 
     // ---- null-safe field extractors for logging ----

@@ -12,8 +12,8 @@ and what side effects happen (database writes, HTTP calls).
 | Component | What it does |
 |-----------|-------------|
 | **DemoFlowTrigger** | HTTP endpoint that simulates TTD creating a processFlow on TMF-701. Publishes a real TMF-701 processFlow payload to `notification.management` topic. |
-| **MockPamConsumer** | Kafka consumer on `notification.management`. Reads real TMF-701 events, extracts `processFlowSpecification` as the DAG key, transforms into `processFlow.initiated` TaskCommand and publishes to `task.command`. Also publishes `flow.lifecycle INITIATED` and injects async signals when called by MockTaskRunner. |
-| **Orchestrator** | Kafka consumer on `task.command` (group: `task-orchestrator`). Manages batch barriers, seeds batches, publishes `task.execute` commands, advances the DAG. Publishes `flow.lifecycle COMPLETED/FAILED` when the flow finishes. |
+| **MockPamConsumer** | Kafka consumer on `notification.management`. Reads real TMF-701 events, extracts `processFlowSpecification` as the DAG key, transforms into `processFlow.initiated` TaskCommand and publishes to `task.command`. Also injects async signals when called by MockTaskRunner. |
+| **Orchestrator** | Kafka consumer on `task.command` (group: `task-orchestrator`). Manages batch barriers, seeds batches, publishes `task.execute` commands, advances the DAG. Emits ALL `flow.lifecycle` events (INITIAL / COMPLETED / FAILED) — the orchestrator is the single authoritative producer for flow-level lifecycle. |
 | **MockTaskRunner** | Kafka consumer on `task.command` (group: `mock-task-runner`). Executes actions with configurable retry on downstream HTTP calls. SYNC actions complete immediately, ASYNC actions go through WAITING → signal → COMPLETED. |
 | **MockTmf701Controller** | HTTP mock at `/mock/tmf701`. Stores processFlow state in memory. The orchestrator PATCHes it on COMPLETED/FAILED to register taskFlow references (appended, not replaced) and update lifecycle state. Does NOT PATCH on WAITING. |
 | **MockActionRegistryController** | HTTP mock at `/mock/actionregistry`. Serves two APIs: `GET /actions` (actionName → actionCode) and `GET /dcx-actions` (actionName → dcxActionCode). Both are loaded at startup and reloaded every 24 hours (configurable). |
@@ -76,7 +76,7 @@ batches:
 
 The DAG defines only `actionName`, `executionMode`, and `dependsOn`. Retry config
 (`maxAttempts`, `timeoutMs`) is NOT in the DAG — it's the task-runner's responsibility
-via `task-runner.retry.*` properties.
+and lives with the task-runner service, not with the orchestrator.
 
 When an action declares `dependsOn`, the orchestrator queries the `task_execution` table
 for the latest COMPLETED result of each listed action and passes it in
@@ -146,7 +146,9 @@ a processFlow is created via HTTP POST from TTD.
 - Extracts `processFlowSpecification` → `"Auto_Remediation"` → uses as `dagKey`
 - Converts the entire payload into a Map and puts it into `inputs.processFlow`
 - Publishes a `processFlow.initiated` TaskCommand to `task.command` (step 2)
-- Publishes a `flow.lifecycle` INITIATED event to `task.command` (step 2a)
+
+The `flow.lifecycle` INITIAL event is emitted by the orchestrator, not by
+pamconsumer — see step 2a below.
 
 ---
 
@@ -198,11 +200,11 @@ a processFlow is created via HTTP POST from TTD.
 
 ---
 
-## Step 2a — flow.lifecycle INITIATED
+## Step 2a — flow.lifecycle INITIAL
 
 **Topic:** `task.command`
-**Published by:** MockPamConsumer (immediately after step 2)
-**Consumed by:** Nobody (the orchestrator ignores `flow.lifecycle` messages)
+**Published by:** Orchestrator (immediately after seeding batch 0, post-commit)
+**Consumed by:** Nobody (the orchestrator skips `flow.lifecycle` messages it sees)
 **Payload type:** `TaskCommand`
 
 ```json
@@ -213,13 +215,16 @@ a processFlow is created via HTTP POST from TTD.
   "eventTime": "2026-04-14T01:41:26.525Z",
   "messageType": "EVENT",
   "messageName": "flow.lifecycle",
-  "source": "pamconsumer",
+  "source": "task-orchestrator",
   "dagKey": "Auto_Remediation",
   "status": "INITIAL"
 }
 ```
 
 Observability event. Filter by `messageName = "flow.lifecycle"` to track flow start/end.
+All three lifecycle events (INITIAL, COMPLETED, FAILED) carry
+`source = "task-orchestrator"` so you have a single authoritative producer to
+filter on.
 
 ---
 
@@ -258,7 +263,8 @@ Observability event. Filter by `messageName = "flow.lifecycle"` to track flow st
 - `action.actionName` → from DAG YAML
 - `action.actionCode` → looked up from `GET /actions` by actionName
 - `action.dcxActionCode` → looked up from `GET /dcx-actions` by actionName
-- `execution.mode`, `execution.timeoutMs`, `execution.maxAttempts` → from DAG YAML
+- `execution.mode` → from DAG YAML
+  (`execution.timeoutMs` and `execution.maxAttempts` are owned by the task-runner, not the orchestrator)
 
 **What MockTaskRunner does:**
 - Calls downstream with retry (configurable: max 3 attempts on HTTP 502/503/504/429)
@@ -334,9 +340,34 @@ Observability event. Filter by `messageName = "flow.lifecycle"` to track flow st
   },
   "batch": { "index": 0 },
   "execution": { "mode": "SYNC", "attempt": 1, "startedAt": "...", "finishedAt": "...", "durationMs": 1000 },
-  "result": { "actionName": "runInternetCheck", "completedAt": "...", "status": "OK" }
+  "result": {
+    "name": "runInternetCheck",
+    "code": "INTERNET_CHECK",
+    "id": "tf-ca72d013",
+    "type": "TaskFlow",
+    "taskResult": {
+      "outcome": "PASS",
+      "diagnosticSummary": "All checks passed for runInternetCheck",
+      "latencyMs": 245
+    },
+    "taskFlowResponse": {
+      "id": "tf-ca72d013",
+      "href": "http://mock-tmf701/.../taskFlow/tf-ca72d013",
+      "@type": "TaskFlow",
+      "state": "completed",
+      "characteristic": [
+        { "name": "outcome", "value": "PASS" },
+        { "name": "diagnosticSummary", "value": "All checks passed for runInternetCheck" }
+      ]
+    },
+    "taskStatusCode": "COMPLETED"
+  }
 }
 ```
+
+The `result` field is an `ActionResponse` with two payload slots:
+- `taskResult` — the raw downstream response body (any shape: `JsonNode`, `Map`, domain DTO). Used for dependency-result passing between batches and for audit.
+- `taskFlowResponse` — the typed TMF-701 `TaskFlow` resource (`id`, `href`, `state`, `characteristic[]`). The orchestrator reads `href` from here to PATCH the parent processFlow.
 
 **What the Orchestrator does:**
 1. Inserts `task_execution` row: `process_flow_id=bbf5e84d, task_flow_id=tf-ca72d013, status=COMPLETED`
@@ -442,7 +473,28 @@ Observability event. Filter by `messageName = "flow.lifecycle"` to track flow st
   "batch": { "index": 0 },
   "execution": { "mode": "ASYNC", "attempt": 1, "startedAt": "...", "finishedAt": "...", "durationMs": 1000 },
   "downstream": { "id": "ASYNC_1e4ec1e0-68a", "href": "http://mock-downstream/queries/ASYNC_1e4ec1e0-68a" },
-  "result": { "asyncResult": "PASS", "fetchedFrom": "http://mock-downstream/queries/ASYNC_1e4ec1e0-68a", "completedAt": "..." }
+  "result": {
+    "name": "runVoiceDiagnostic",
+    "code": "VOICE_SERVICE_DIAGNOSTIC",
+    "id": "tf-31c94387",
+    "type": "TaskFlow",
+    "taskResult": {
+      "outcome": "PASS",
+      "diagnosticSummary": "Async voice diagnostic completed successfully",
+      "latencyMs": 1200
+    },
+    "taskFlowResponse": {
+      "id": "tf-31c94387",
+      "href": "http://mock-tmf701/.../taskFlow/tf-31c94387",
+      "@type": "TaskFlow",
+      "state": "completed",
+      "characteristic": [
+        { "name": "outcome", "value": "PASS" },
+        { "name": "diagnosticSummary", "value": "Async voice diagnostic completed successfully" }
+      ]
+    },
+    "taskStatusCode": "COMPLETED"
+  }
 }
 ```
 
@@ -480,8 +532,8 @@ Observability event. Filter by `messageName = "flow.lifecycle"` to track flow st
   "inputs": {
     "processFlow": { "id": "bbf5e84d-...", "processFlowSpecification": "Auto_Remediation" },
     "dependencyResults": {
-      "runInternetCheck": "{\"actionName\":\"runInternetCheck\",\"completedAt\":\"...\",\"status\":\"OK\"}",
-      "runVoiceDiagnostic": "{\"asyncResult\":\"PASS\",\"fetchedFrom\":\"...\",\"completedAt\":\"...\"}"
+      "runInternetCheck":   "{\"name\":\"runInternetCheck\",\"id\":\"tf-ca72d013\",\"taskResult\":{\"outcome\":\"PASS\"},\"taskFlowResponse\":{\"id\":\"tf-ca72d013\",\"href\":\"http://.../taskFlow/tf-ca72d013\",\"state\":\"completed\"},\"taskStatusCode\":\"COMPLETED\"}",
+      "runVoiceDiagnostic": "{\"name\":\"runVoiceDiagnostic\",\"id\":\"tf-31c94387\",\"taskResult\":{\"outcome\":\"PASS\"},\"taskFlowResponse\":{\"id\":\"tf-31c94387\",\"href\":\"http://.../taskFlow/tf-31c94387\",\"state\":\"completed\"},\"taskStatusCode\":\"COMPLETED\"}"
     }
   }
 }
@@ -508,7 +560,24 @@ Observability event. Filter by `messageName = "flow.lifecycle"` to track flow st
   "action": { "actionName": "sendNotification", "actionCode": "NOTIFY_USER", "dcxActionCode": "DCX-NOT-09" },
   "batch": { "index": 1 },
   "execution": { "mode": "SYNC", "attempt": 1, "startedAt": "...", "finishedAt": "...", "durationMs": 1000 },
-  "result": { "actionName": "sendNotification", "completedAt": "...", "status": "OK" }
+  "result": {
+    "name": "sendNotification",
+    "code": "NOTIFY_USER",
+    "id": "tf-4b6b61e2",
+    "type": "TaskFlow",
+    "taskResult": {
+      "outcome": "PASS",
+      "notificationSent": true
+    },
+    "taskFlowResponse": {
+      "id": "tf-4b6b61e2",
+      "href": "http://mock-tmf701/.../taskFlow/tf-4b6b61e2",
+      "@type": "TaskFlow",
+      "state": "completed",
+      "characteristic": [ { "name": "outcome", "value": "PASS" } ]
+    },
+    "taskStatusCode": "COMPLETED"
+  }
 }
 ```
 
@@ -650,7 +719,7 @@ GET /mock/tmf701/processFlow/bbf5e84d-...
 
 Exactly **3 entries** — one per task, no duplicates. WAITING does not PATCH, only COMPLETED does.
 
-### Kafka UI (http://localhost:9091)
+### Kafka topic contents (inspect with `kcat` or a Kafka CLI)
 
 **notification.management — 1 message:**
 
@@ -663,7 +732,7 @@ Exactly **3 entries** — one per task, no duplicates. WAITING does not PATCH, o
 | Offset | messageName | source | status |
 |--------|-------------|--------|--------|
 | 0 | processFlow.initiated | pamconsumer | — |
-| 1 | flow.lifecycle | pamconsumer | INITIAL |
+| 1 | flow.lifecycle | task-orchestrator | INITIAL |
 | 2 | task.execute | task-orchestrator | — |
 | 3 | task.execute | task-orchestrator | — |
 | 4 | task.event | task-runner | COMPLETED |
@@ -684,15 +753,15 @@ Exactly **3 entries** — one per task, no duplicates. WAITING does not PATCH, o
 
 ### Task-runner retry config
 
-```yaml
-task-runner:
-  retry:
-    max-attempts: 3
-    backoff-ms: 1000
-    retryable-status-codes: [502, 503, 504, 429]
-```
+Retry configuration for downstream HTTP calls lives with the task-runner service,
+not the orchestrator. In this repo the only consumer is `mock-task-runner`, which
+reads it via `TaskRunnerRetryProperties` (defaults: `max-attempts=3`,
+`backoff-ms=1000`, `retryable-status-codes=[502, 503, 504, 429]`). Override
+by adding a `task-runner.retry.*` block to the runner's own config when needed.
 
-Downstream HTTP calls are retried up to `max-attempts` times when the response status code is in `retryable-status-codes`. Non-retryable codes (e.g. 400, 404, 500) fail immediately.
+Downstream HTTP calls are retried up to `max-attempts` times when the response
+status code is in `retryable-status-codes`. Non-retryable codes (400, 404, 500,
+etc.) fail immediately.
 
 ### Action registry reload config
 

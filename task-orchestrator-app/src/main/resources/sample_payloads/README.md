@@ -1,11 +1,30 @@
 # Task Orchestrator — Sample Payloads
 
-Reference JSON payloads for every Kafka message flowing through the task-orchestrator
-system. Intended for consumers, producers, integration testers, and documentation.
+Reference JSON payloads covering every message type that flows through the
+orchestrator. The payloads are organised by `processFlowSpecification`
+(= DAG key) so each subfolder walks one complete end-to-end scenario.
 
-All payloads describe the **Auto_Remediation** DAG running end-to-end for a single
-`processFlow` (`correlationId = bbf5e84d-9c3a-4e7b-a1f2-3d6e8f0a1b2c`). Timestamps
-progress chronologically so the files can be read in order as a narrative.
+```
+sample_payloads/
+├── passwordPushV2/       — async single-action flow (DAG key: passwordPushV2)
+├── passwordResetV2/      — async single-action flow (DAG key: passwordResetV2)
+├── miscellaneous/        — sync  single-action flow (DAG key: miscellaneous)
+└── common/               — scenario-agnostic payloads (failure, lifecycle FAILED)
+```
+
+The three scenarios mirror the three DAG YAMLs under
+`task-orchestrator-app/src/main/resources/dag/`:
+
+| DAG key            | YAML file              | Batches | Actions                                  |
+|--------------------|------------------------|---------|------------------------------------------|
+| `passwordPushV2`   | `passwordPushV2.yml`   | 1       | `passwordPushV2`  (ASYNC)                |
+| `passwordResetV2`  | `passwordResetV2.yml`  | 1       | `passwordResetV2` (ASYNC)                |
+| `miscellaneous`    | `miscellaneous.yml`    | 1       | `miscellaneous`   (SYNC)                 |
+
+> The action registry in `mock-action-registry` defines matching
+> `actionCode` / `dcxActionCode` entries for all three actions so these
+> scenarios also run end-to-end against the local-dev stack, not just as
+> documentation.
 
 ---
 
@@ -13,108 +32,152 @@ progress chronologically so the files can be read in order as a narrative.
 
 | Topic | Purpose |
 |---|---|
-| `notification.management` | TMF-701 native events — the system under test consumes from here and publishes *to* it for async response callbacks. |
-| `task.command` | The single internal bus carrying orchestrator commands, task events, signals, and flow lifecycle events. Partitioned by `correlationId` so all events for one flow are processed in order. |
+| `notification.management` | TMF-701 native events — the orchestrator's `pamconsumer` reads from this topic; external systems also publish async response callbacks here. |
+| `task.command`            | The single internal bus carrying orchestrator commands, task events, signals, and flow lifecycle events. Partitioned by `correlationId` so all events for one flow are processed in order. |
 
 ---
 
-## DAG: `Auto_Remediation`
+## Scenario 1 — `passwordPushV2` (ASYNC)
 
-```
-Batch 0  (parallel)               Batch 1
-┌──────────────────────────┐      ┌──────────────────────────┐
-│ runInternetCheck  (SYNC) │ ───▶ │ sendNotification (SYNC)  │
-│ runVoiceDiagnostic(ASYNC)│      │   depends on both        │
-└──────────────────────────┘      └──────────────────────────┘
-```
+A password push to a target credential store. The action is
+dispatched, the task-runner acknowledges and publishes `WAITING`, the
+downstream system later sends an async response on
+`notification.management`, pamconsumer converts it into a `task.signal`,
+and the runner publishes `COMPLETED`.
 
-See `src/main/resources/dag/Auto_Remediation.yml`.
+Correlation ID: `11111111-aaaa-4bbb-8ccc-000000000001`
+
+| # | File | Topic | Producer → Consumer |
+|---|------|-------|---------------------|
+| 01 | `01_processflow_created_notification.json` | `notification.management` | TMF-701 → pamconsumer |
+| 02 | `02_processflow_initiated.json`            | `task.command`            | pamconsumer → task-orchestrator |
+| 08a| `08a_flow_lifecycle_initial.json`          | `task.command`            | task-orchestrator → (observers) |
+| 03 | `03_task_execute_async.json`               | `task.command`            | task-orchestrator → task-runner |
+| 04 | `04_task_event_waiting.json`               | `task.command`            | task-runner → task-orchestrator |
+| 05 | `05_async_response_notification.json`      | `notification.management` | external system → pamconsumer |
+| 06 | `06_task_signal.json`                      | `task.command`            | pamconsumer → task-runner |
+| 07 | `07_task_event_completed.json`             | `task.command`            | task-runner → task-orchestrator |
+| 08b| `08b_flow_lifecycle_completed.json`        | `task.command`            | task-orchestrator → (observers) |
 
 ---
 
-## Payload Index
+## Scenario 2 — `passwordResetV2` (ASYNC)
 
-### Happy path — end-to-end flow
+A password reset against a federated identity system. Identical shape
+to `passwordPushV2` — different action, different ids, same async
+WAITING → signal → COMPLETED roundtrip. Use this scenario to see the
+pattern applied to a second, independent DAG.
 
-| # | File | Topic | Producer → Consumer | What it represents |
-|---|------|-------|---------------------|--------------------|
-| 01 | `01_processflow_created_notification.json` | `notification.management` | TMF-701 → pamconsumer | A TMF-701 processFlow was just created. Entry point to the system. |
-| 02 | `02_processflow_initiated.json` | `task.command` | pamconsumer → task-orchestrator | pamconsumer's transformation of (01). Triggers DAG execution. |
-| 10a | `10a_flow_lifecycle_initiated.json` | `task.command` | task-orchestrator → (observers) | Flow-level lifecycle event emitted when seeding batch 0. |
-| 03a | `03a_task_execute_sync_runInternetCheck.json` | `task.command` | task-orchestrator → task-runner | Command to execute batch 0 / action 1 (SYNC). |
-| 03b | `03b_task_execute_async_runVoiceDiagnostic.json` | `task.command` | task-orchestrator → task-runner | Command to execute batch 0 / action 2 (ASYNC). |
-| 04a | `04a_task_event_completed_sync_runInternetCheck.json` | `task.command` | task-runner → task-orchestrator | SYNC action completed — result carried in `result` (ActionResponse). |
-| 04b | `04b_task_event_waiting_async_runVoiceDiagnostic.json` | `task.command` | task-runner → task-orchestrator | ASYNC action started — flow pauses awaiting a signal. |
-| 11 | `11_async_response_notification.json` | `notification.management` | external system → pamconsumer | Downstream system reports async completion (TMF-701 event format). |
-| 05 | `05_task_signal_async_response.json` | `task.command` | pamconsumer → task-runner | pamconsumer's transformation of (11) — unblocks the WAITING task. |
-| 06 | `06_task_event_completed_async_runVoiceDiagnostic.json` | `task.command` | task-runner → task-orchestrator | ASYNC action completed after receiving (05). Batch 0 now closes. |
-| 07 | `07_task_execute_sync_sendNotification_with_dependencies.json` | `task.command` | task-orchestrator → task-runner | Batch 1 / action 1 — includes `dependencyResults` from batch 0. |
-| 08 | `08_task_event_completed_sync_sendNotification.json` | `task.command` | task-runner → task-orchestrator | Batch 1 completes → flow done. |
-| 10b | `10b_flow_lifecycle_completed.json` | `task.command` | task-orchestrator → (observers) | Flow-level lifecycle event: all batches closed. |
+Correlation ID: `22222222-bbbb-4ccc-8ddd-000000000001`
 
-### Failure scenarios
+| # | File | Topic | Producer → Consumer |
+|---|------|-------|---------------------|
+| 01 | `01_processflow_created_notification.json` | `notification.management` | TMF-701 → pamconsumer |
+| 02 | `02_processflow_initiated.json`            | `task.command`            | pamconsumer → task-orchestrator |
+| 08a| `08a_flow_lifecycle_initial.json`          | `task.command`            | task-orchestrator → (observers) |
+| 03 | `03_task_execute_async.json`               | `task.command`            | task-orchestrator → task-runner |
+| 04 | `04_task_event_waiting.json`               | `task.command`            | task-runner → task-orchestrator |
+| 05 | `05_async_response_notification.json`      | `notification.management` | external system → pamconsumer |
+| 06 | `06_task_signal.json`                      | `task.command`            | pamconsumer → task-runner |
+| 07 | `07_task_event_completed.json`             | `task.command`            | task-runner → task-orchestrator |
+| 08b| `08b_flow_lifecycle_completed.json`        | `task.command`            | task-orchestrator → (observers) |
 
-| # | File | Topic | What it represents |
-|---|------|-------|--------------------|
-| 09 | `09_task_event_failed_non_retryable.json` | `task.command` | A task that failed non-retryably. `error` is populated; `result` reflects FAILED status. |
-| 10c | `10c_flow_lifecycle_failed.json` | `task.command` | Flow-level lifecycle event emitted after a non-retryable task failure. |
+---
+
+## Scenario 3 — `miscellaneous` (SYNC)
+
+A plain SYNC task. No WAITING, no signal — the task-runner does the
+downstream work inline and publishes `COMPLETED` as its only
+`task.event`. This is the reference scenario for a straight sync flow.
+
+Correlation ID: `33333333-cccc-4ddd-8eee-000000000001`
+
+| # | File | Topic | Producer → Consumer |
+|---|------|-------|---------------------|
+| 01 | `01_processflow_created_notification.json` | `notification.management` | TMF-701 → pamconsumer |
+| 02 | `02_processflow_initiated.json`            | `task.command`            | pamconsumer → task-orchestrator |
+| 05a| `05a_flow_lifecycle_initial.json`          | `task.command`            | task-orchestrator → (observers) |
+| 03 | `03_task_execute_sync.json`                | `task.command`            | task-orchestrator → task-runner |
+| 04 | `04_task_event_completed.json`             | `task.command`            | task-runner → task-orchestrator |
+| 05b| `05b_flow_lifecycle_completed.json`        | `task.command`            | task-orchestrator → (observers) |
+
+---
+
+## Common — failure scenarios
+
+| File | What it is |
+|------|-----------|
+| `task_event_failed_non_retryable.json` | `task.event` with `status=FAILED` and `error.retryable=false`. The `result.taskFlowResponse.state` is `failed`. The orchestrator will flip the barrier to FAILED and PATCH the parent processFlow to `state=failed`. |
+| `flow_lifecycle_failed.json`           | `flow.lifecycle` event the orchestrator emits after a non-retryable task failure (`source=task-orchestrator`, `status=FAILED`). |
+
+The correlation IDs in the common payloads use the `passwordPushV2`
+flow's UUID, but you can adapt them to any scenario — the envelope is
+DAG-agnostic.
 
 ---
 
 ## Envelope contract
 
-Every message on `task.command` uses a uniform envelope (`TaskCommand`). Consumers
-should dispatch on `messageName` + `source`:
+Every message on `task.command` uses a uniform envelope (`TaskCommand`).
+Consumers dispatch on `messageName` + `source`:
 
-| `messageName` | `source` | Who produces | Meaning |
-|---|---|---|---|
-| `processFlow.initiated` | `pamconsumer` | pamconsumer | A new DAG execution was seeded from a TMF-701 processFlow. |
-| `task.execute` | `task-orchestrator` | orchestrator | Command for the task-runner to execute a DAG action. |
-| `task.event` | `task-runner` | task-runner | Progress update for a single action (`status`: WAITING, COMPLETED, FAILED, CANCELLED). |
-| `task.signal` | `pamconsumer` | pamconsumer | External system signal that unblocks a WAITING async task. |
-| `flow.lifecycle` | `pamconsumer` / `task-orchestrator` | both | Coarse-grained flow-level state change (INITIAL, COMPLETED, FAILED). |
+| `messageName`           | `source`              | Meaning |
+|-------------------------|-----------------------|---------|
+| `processFlow.initiated` | `pamconsumer`         | A new DAG execution is seeded from a TMF-701 processFlow. |
+| `task.execute`          | `task-orchestrator`   | Command for the task-runner to execute a DAG action. |
+| `task.event`            | `task-runner`         | Progress update for a single action (`status` ∈ {WAITING, COMPLETED, FAILED, CANCELLED}). |
+| `task.signal`           | `pamconsumer`         | External system signal that unblocks a WAITING async task. |
+| `flow.lifecycle`        | `task-orchestrator`   | Coarse-grained flow-level state change (INITIAL, COMPLETED, FAILED). Single authoritative producer. |
 
-Kafka record key is always `correlationId` (the processFlow UUID) — guarantees
-ordered delivery of all messages for one flow to a single consumer.
+Kafka record key is always `correlationId` (the processFlow UUID) so
+all messages for one flow land on the same partition and are processed
+in order.
 
 ---
 
-## Conventions used in these samples
+## `result` field shape (task.event)
 
-- **Correlation:** every message shares `correlationId = bbf5e84d-9c3a-4e7b-a1f2-3d6e8f0a1b2c`
-  and any embedded processFlow shares the same `id`.
-- **Timestamps:** `eventTime` progresses through the 3.4-second happy path
-  (T+0.100s → T+3.400s). `execution.startedAt` / `finishedAt` tell the real wall-clock
-  work performed by the task-runner.
-- **IDs:** `taskFlowId` always starts with `tf-` followed by 8 hex chars; async downstream
-  transaction IDs start with `ASYNC-`.
-- **URLs:** all examples use RFC-2606 `*.example.com` reserved hostnames. Replace with
-  your environment's real endpoints.
-- **Null-exclusion:** payloads omit fields that are null (`@JsonInclude(NON_NULL)` on the
-  envelope). Consumers MUST tolerate absent optional fields.
-- **Schema version:** all messages declare `schemaVersion: "1.0"`. Future breaking
-  changes will bump this.
+The `result` on a `task.event` is an `ActionResponse` with two payload
+slots:
+
+| Slot              | Type                    | Contents |
+|-------------------|-------------------------|----------|
+| `taskResult`      | `Object` (free-form)    | Raw downstream response body — `JsonNode`, `Map`, or a domain DTO. Whatever the runner received from the downstream call. Used for `dependencyResults` pass-through and audit. |
+| `taskFlowResponse`| TMF-701 `TaskFlow`      | Typed: `id`, `href`, `state`, `characteristic[]`. The orchestrator reads `href` here to PATCH the parent processFlow. Domain outputs (`outcome`, …) should also be emitted here as `characteristic` entries per TMF convention. |
+
+---
+
+## Conventions
+
+- **Correlation:** each DAG scenario has its own `correlationId`
+  (UUID). Every message in that scenario shares the same id; the
+  embedded `inputs.processFlow.id` matches.
+- **IDs:** `taskFlowId` prefixes indicate the DAG
+  (`tf-pwp-*`, `tf-pwr-*`, `tf-misc-*`). Async downstream transaction
+  IDs start with `ASYNC-`.
+- **URLs:** all examples use RFC-2606 reserved hostnames
+  (`*.example.com`). Replace with your real endpoints.
+- **Null-exclusion:** payloads omit fields that are null
+  (`@JsonInclude(NON_NULL)`). Consumers must tolerate absent optional
+  fields.
+- **Schema version:** all messages declare `schemaVersion: "1.0"`.
 
 ---
 
 ## Using these payloads
 
-**For consumers:** pick the payload(s) for the `messageName` you handle; wire them into
-your test fixtures. Expect the fields shown; any field not shown for your `messageName`
-will be absent on the wire.
+**For consumers:** pick the payload for the `messageName` you handle
+and wire it into your test fixtures. The three async scenarios are
+functionally identical shapes — use whichever reads clearer.
 
-**For producers (outside this repo):** the shape shown here is what the orchestrator
-expects. Match field names and types exactly. Use `correlationId` = your TMF-701
-processFlow id.
-
-**For manual publishing (kcat / Kafka UI):**
+**For manual publishing** (`kcat` / Kafka CLI):
 
 ```bash
-kcat -b $BROKER -t task.command -K: \
-  -P <<EOF
-bbf5e84d-9c3a-4e7b-a1f2-3d6e8f0a1b2c:$(cat 03a_task_execute_sync_runInternetCheck.json)
+# publish a processFlow.initiated for the passwordPushV2 scenario
+kcat -b $BROKER -t task.command -K: -P <<EOF
+11111111-aaaa-4bbb-8ccc-000000000001:$(cat passwordPushV2/02_processflow_initiated.json)
 EOF
 ```
 
-The record key (`-K:` then `correlationId:json`) must equal `correlationId` for
-partition ordering to hold.
+The record key (`-K:` then `correlationId:json`) must equal
+`correlationId` for partition ordering to hold.

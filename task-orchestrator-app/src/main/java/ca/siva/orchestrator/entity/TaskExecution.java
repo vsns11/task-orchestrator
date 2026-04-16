@@ -54,9 +54,15 @@ public class TaskExecution {
     @Column(name = "duration_ms")
     private Long durationMs;
 
+    /**
+     * Serialized downstream result. Stored as unbounded {@code TEXT}
+     * (Postgres {@code TEXT} has no length limit). Any size cap should be
+     * enforced at the database layer, not in application code.
+     */
     @Column(name = "result_json", columnDefinition = "TEXT")
     private String resultJson;
 
+    /** Serialized error payload. Unbounded {@code TEXT}. */
     @Column(name = "error_json", columnDefinition = "TEXT")
     private String errorJson;
 

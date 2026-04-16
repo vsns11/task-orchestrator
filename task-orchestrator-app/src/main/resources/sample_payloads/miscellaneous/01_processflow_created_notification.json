@@ -1,0 +1,23 @@
+{
+  "id": "33333333-cccc-4ddd-8eee-000000000001",
+  "href": "https://tmf-process-flow.example.com/tmf-api/processFlowManagement/v4/processFlow/33333333-cccc-4ddd-8eee-000000000001",
+  "@type": "processFlow",
+  "state": "active",
+  "@baseType": "processFlow",
+  "channel": [],
+  "relatedParty": [],
+  "relatedEntity": [
+    {
+      "id": "MISC-REQ-2026-04-15-0001",
+      "href": "https://internal-ops.example.com/miscTasks/MISC-REQ-2026-04-15-0001",
+      "name": "Miscellaneous Sync Request",
+      "role": "RelatedEntity",
+      "@type": "RelatedEntity",
+      "@referredType": "MiscellaneousRequest"
+    }
+  ],
+  "characteristic": [
+    { "id": "CTX-001", "name": "context", "value": "manual-ops-run", "valueType": "string", "characteristicRelationship": [] }
+  ],
+  "processFlowSpecification": "miscellaneous"
+}

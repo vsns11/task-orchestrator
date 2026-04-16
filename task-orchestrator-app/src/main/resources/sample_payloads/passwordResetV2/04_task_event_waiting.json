@@ -1,0 +1,38 @@
+{
+  "eventId": "d2d2d2d2-bbbb-4ccc-8ddd-000000000004",
+  "correlationId": "22222222-bbbb-4ccc-8ddd-000000000001",
+  "schemaVersion": "1.0",
+  "eventTime": "2026-04-15T14:05:00.500Z",
+  "messageType": "EVENT",
+  "messageName": "task.event",
+  "source": "task-runner",
+  "status": "WAITING",
+  "action": {
+    "actionName": "passwordResetV2",
+    "actionCode": "PASSWORD_RESET_V2",
+    "dcxActionCode": "DCX-PWR-01"
+  },
+  "batch": {
+    "index": 0
+  },
+  "execution": {
+    "mode": "ASYNC",
+    "startedAt": "2026-04-15T14:05:00.500Z"
+  },
+  "awaitingSignal": {
+    "downstreamTransactionId": "ASYNC-PWR-5f7d9c3b-21c"
+  },
+  "result": {
+    "name": "passwordResetV2",
+    "code": "PASSWORD_RESET_V2",
+    "id": "tf-pwr-b1",
+    "type": "TaskFlow",
+    "taskFlowResponse": {
+      "id": "tf-pwr-b1",
+      "href": "https://tmf-process-flow.example.com/tmf-api/processFlowManagement/v4/processFlow/22222222-bbbb-4ccc-8ddd-000000000001/taskFlow/tf-pwr-b1",
+      "@type": "TaskFlow",
+      "state": "acknowledged"
+    },
+    "taskStatusCode": "WAITING"
+  }
+}

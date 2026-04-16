@@ -1,0 +1,11 @@
+{
+  "eventId": "b4b4b4b4-bbbb-4ccc-8ddd-00000000008a",
+  "correlationId": "22222222-bbbb-4ccc-8ddd-000000000001",
+  "schemaVersion": "1.0",
+  "eventTime": "2026-04-15T14:05:00.260Z",
+  "messageType": "EVENT",
+  "messageName": "flow.lifecycle",
+  "source": "task-orchestrator",
+  "dagKey": "passwordResetV2",
+  "status": "INITIAL"
+}

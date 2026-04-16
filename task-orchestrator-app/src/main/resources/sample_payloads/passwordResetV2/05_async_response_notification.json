@@ -1,0 +1,14 @@
+{
+  "correlationId": "ASYNC-PWR-5f7d9c3b-21c",
+  "domain": "credential-management",
+  "eventId": "e2e2e2e2-bbbb-4ccc-8ddd-000000000005",
+  "eventTime": "2026-04-15T14:05:02.900Z",
+  "priority": "NORMAL",
+  "title": "passwordResetV2-async-response",
+  "event": {
+    "id": "ASYNC-PWR-5f7d9c3b-21c",
+    "href": "https://credential-store.example.com/resetRequests/PWR-TXN-2026-04-15-0001/result"
+  },
+  "reportingSystem": { "id": "ACUT", "name": "ACUT" },
+  "@type": "TaskFinalAsyncResponseSend"
+}

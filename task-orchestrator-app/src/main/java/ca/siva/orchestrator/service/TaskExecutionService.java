@@ -23,10 +23,6 @@ import java.util.Optional;
 @RequiredArgsConstructor
 public class TaskExecutionService {
 
-    /** Cap JSON blob size to protect the DB from an exceptionally large downstream payload. */
-    private static final int MAX_JSON_LENGTH = 65_536; // 64 KB
-    private static final String TRUNCATED_MARKER = "\"...TRUNCATED\"";
-
     private final TaskExecutionRepository repo;
     private final ObjectMapper mapper;
 
@@ -88,20 +84,16 @@ public class TaskExecutionService {
     }
 
     /**
-     * Serializes the given object to JSON, capping the output at {@link #MAX_JSON_LENGTH}
-     * bytes. Oversized payloads are truncated and tagged so investigation is possible.
+     * Serializes the given object to JSON. The target column ({@code result_json})
+     * is a Postgres {@code TEXT} column with no length limit, so the full payload
+     * is persisted as-is. If you need a hard ceiling for a specific environment,
+     * enforce it at the DB level (e.g. a column type cap) rather than silently
+     * truncating here.
      */
     private String serialize(Object o) {
         if (o == null) return null;
         try {
-            String json = mapper.writeValueAsString(o);
-            if (json.length() > MAX_JSON_LENGTH) {
-                log.warn("Result JSON size {} exceeds cap {} — truncating",
-                        json.length(), MAX_JSON_LENGTH);
-                return json.substring(0, MAX_JSON_LENGTH - TRUNCATED_MARKER.length())
-                        + TRUNCATED_MARKER;
-            }
-            return json;
+            return mapper.writeValueAsString(o);
         } catch (JsonProcessingException e) {
             log.warn("Could not serialize: {}", e.getMessage());
             return null;

@@ -1,0 +1,24 @@
+{
+  "id": "11111111-aaaa-4bbb-8ccc-000000000001",
+  "href": "https://tmf-process-flow.example.com/tmf-api/processFlowManagement/v4/processFlow/11111111-aaaa-4bbb-8ccc-000000000001",
+  "@type": "processFlow",
+  "state": "active",
+  "@baseType": "processFlow",
+  "channel": [],
+  "relatedParty": [],
+  "relatedEntity": [
+    {
+      "id": "PWP-TXN-2026-04-15-0001",
+      "href": "https://credential-store.example.com/pushRequests/PWP-TXN-2026-04-15-0001",
+      "name": "Password Push Request",
+      "role": "RelatedEntity",
+      "@type": "RelatedEntity",
+      "@referredType": "PasswordPushRequest"
+    }
+  ],
+  "characteristic": [
+    { "id": "USER-00123", "name": "userId",       "value": "user-00123",      "valueType": "string", "characteristicRelationship": [] },
+    { "id": "TARGET-AD",  "name": "targetSystem", "value": "active-directory","valueType": "string", "characteristicRelationship": [] }
+  ],
+  "processFlowSpecification": "passwordPushV2"
+}

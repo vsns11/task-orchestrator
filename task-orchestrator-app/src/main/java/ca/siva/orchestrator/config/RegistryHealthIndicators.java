@@ -14,14 +14,19 @@ import org.springframework.context.annotation.Configuration;
  * would return UP even if both registries failed to load — silently swallowing
  * a startup bug that would break every incoming flow.
  *
- * <p>Endpoints:</p>
+ * <p>Bean name convention: Spring Boot derives the health endpoint name from the
+ * bean name by stripping the trailing {@code HealthIndicator}. So:</p>
  * <ul>
- *   <li>{@code /actuator/health/actionRegistry} — DOWN if the action-code registry is empty</li>
- *   <li>{@code /actuator/health/dagRegistry}    — DOWN if no DAG YAML files were loaded</li>
+ *   <li>bean {@code actionRegistryHealthIndicator} →
+ *       {@code /actuator/health/actionRegistry} — DOWN if the action-code registry is empty</li>
+ *   <li>bean {@code dagRegistryHealthIndicator}    →
+ *       {@code /actuator/health/dagRegistry}    — DOWN if no DAG YAML files were loaded</li>
  * </ul>
  *
  * <p>Both are included in the {@code readiness} health group (see application.yml),
- * so Kubernetes will not route traffic to a pod whose registries aren't populated.</p>
+ * so Kubernetes will not route traffic to a pod whose registries aren't populated.
+ * They are intentionally NOT in the {@code liveness} group — a registry load
+ * failure should prevent traffic but must not trigger a pod restart loop.</p>
  */
 @Configuration
 @RequiredArgsConstructor

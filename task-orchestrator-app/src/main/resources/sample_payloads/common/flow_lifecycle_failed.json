@@ -1,0 +1,15 @@
+{
+  "eventId": "f9f9f9f9-dddd-4eee-8fff-000000000002",
+  "correlationId": "11111111-aaaa-4bbb-8ccc-000000000001",
+  "schemaVersion": "1.0",
+  "eventTime": "2026-04-15T14:00:01.550Z",
+  "messageType": "EVENT",
+  "messageName": "flow.lifecycle",
+  "source": "task-orchestrator",
+  "status": "FAILED",
+  "error": {
+    "code": "NON_RETRYABLE_ACTION_FAILURE",
+    "message": "action passwordPushV2 non-retryable",
+    "retryable": false
+  }
+}

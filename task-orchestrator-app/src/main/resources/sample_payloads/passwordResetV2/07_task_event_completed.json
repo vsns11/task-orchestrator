@@ -1,0 +1,50 @@
+{
+  "eventId": "a3a3a3a3-bbbb-4ccc-8ddd-000000000007",
+  "correlationId": "22222222-bbbb-4ccc-8ddd-000000000001",
+  "schemaVersion": "1.0",
+  "eventTime": "2026-04-15T14:05:03.200Z",
+  "messageType": "EVENT",
+  "messageName": "task.event",
+  "source": "task-runner",
+  "status": "COMPLETED",
+  "action": {
+    "actionName": "passwordResetV2",
+    "actionCode": "PASSWORD_RESET_V2",
+    "dcxActionCode": "DCX-PWR-01"
+  },
+  "batch": {
+    "index": 0
+  },
+  "execution": {
+    "mode": "ASYNC",
+    "startedAt": "2026-04-15T14:05:00.500Z",
+    "finishedAt": "2026-04-15T14:05:03.200Z",
+    "durationMs": 2700
+  },
+  "result": {
+    "name": "passwordResetV2",
+    "code": "PASSWORD_RESET_V2",
+    "id": "tf-pwr-b1",
+    "type": "TaskFlow",
+    "taskResult": {
+      "outcome": "PASS",
+      "resetAt": "2026-04-15T14:05:03.100Z",
+      "targetSystem": "okta",
+      "userId": "user-00456",
+      "notificationEmailSent": true
+    },
+    "taskFlowResponse": {
+      "id": "tf-pwr-b1",
+      "href": "https://tmf-process-flow.example.com/tmf-api/processFlowManagement/v4/processFlow/22222222-bbbb-4ccc-8ddd-000000000001/taskFlow/tf-pwr-b1",
+      "@type": "TaskFlow",
+      "state": "completed",
+      "characteristic": [
+        { "name": "outcome",               "value": "PASS",         "valueType": "String" },
+        { "name": "targetSystem",          "value": "okta",         "valueType": "String" },
+        { "name": "userId",                "value": "user-00456",   "valueType": "String" },
+        { "name": "notificationEmailSent", "value": "true",         "valueType": "Boolean" }
+      ]
+    },
+    "taskStatusCode": "COMPLETED"
+  }
+}

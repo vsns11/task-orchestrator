@@ -148,7 +148,12 @@ Every message on `task.command`, regardless of producer or purpose, conforms to 
   "trigger":        { "externalEventId": "...", "externalType": "...", "reportingSystem": "..." },
 
   "inputs":  { "processFlow": { /* ... */ }, "downstream": { /* ... */ } },
-  "result":  { /* free-form object — runner-defined per action */ },
+  "result":  {
+    "name": "...", "code": "...", "id": "...", "type": "TaskFlow",
+    "taskResult":       { /* raw downstream response — JsonNode / Map / any object */ },
+    "taskFlowResponse": { /* typed TMF-701 TaskFlow with id, href, state, characteristic[] */ },
+    "taskStatusCode":   "COMPLETED | WAITING | FAILED"
+  },
   "error":   { "code": "...", "message": "...", "retryable": false, "details": { /* ... */ } }
 }
 ```
@@ -206,7 +211,7 @@ schemaVersion:  1.0
 | `trigger` | object | On `task.signal`: which external event triggered this signal. |
 | `inputs.processFlow` | object | Full TMF-701 processFlow object passed forward to the runner. |
 | `inputs.downstream` | object | On `task.signal`: tells the runner which downstream URL to fetch. |
-| `result` | object | Free-form, runner- and action-defined. Present on `task.event` with `status=COMPLETED`. |
+| `result` | `ActionResponse` | Present on `task.event` with `status=COMPLETED` (and `WAITING` for ASYNC). Carries two payloads: `taskResult` (raw downstream response, loosely-typed `Object` — `JsonNode` / `Map` / domain DTO) and `taskFlowResponse` (typed TMF-701 `TaskFlow`: `id`, `href`, `state`, `characteristic[]`). The orchestrator reads the taskFlow `href` from `taskFlowResponse` to PATCH the parent processFlow. |
 | `error` | object | Present on `task.event` with `status=FAILED`. |
 
 ---
@@ -440,8 +445,25 @@ The runner emits **one** event for the entire SYNC lifecycle. The orchestrator s
     "href": "https://internet-check.../checks/INT-CHK-9981"
   },
   "result": {
-    "diagnosticResult": "OK",
-    "metrics": { "latencyMs": 42, "packetLoss": 0.0 }
+    "name": "runInternetCheck",
+    "code": "INTERNET_CHECK",
+    "id":   "tf-7c3d",
+    "type": "TaskFlow",
+    "taskResult": {
+      "diagnosticResult": "OK",
+      "metrics": { "latencyMs": 42, "packetLoss": 0.0 }
+    },
+    "taskFlowResponse": {
+      "id":    "tf-7c3d",
+      "href":  "https://tmf-process-flow.../processFlow/bbf5e84d-.../taskFlow/tf-7c3d",
+      "@type": "TaskFlow",
+      "state": "completed",
+      "characteristic": [
+        { "name": "outcome",          "value": "PASS" },
+        { "name": "diagnosticResult", "value": "OK"   }
+      ]
+    },
+    "taskStatusCode": "COMPLETED"
   },
   "error": null
 }
@@ -535,7 +557,19 @@ An ASYNC action requires **three messages** across **two runner invocations**, s
   "awaitingSignal": {
     "businessTxnId": "VOICE_transactionId_A267E5877F47467993818722C"
   },
-  "result": null,
+  "result": {
+    "name": "runVoiceDiagnostic",
+    "code": "VOICE_SERVICE_DIAGNOSTIC",
+    "id":   "tf-9a1b",
+    "type": "TaskFlow",
+    "taskFlowResponse": {
+      "id":    "tf-9a1b",
+      "href":  "https://tmf-process-flow.../processFlow/bbf5e84d-.../taskFlow/tf-9a1b",
+      "@type": "TaskFlow",
+      "state": "acknowledged"
+    },
+    "taskStatusCode": "WAITING"
+  },
   "error":  null
 }
 ```
@@ -611,12 +645,30 @@ An ASYNC action requires **three messages** across **two runner invocations**, s
     "href": "https://sharp-oneside-task.../findVoiceServiceDiagnosticFromCacheByTransactionId/VOICE_transactionId_A267..."
   },
   "result": {
-    "voiceDiagnostic": {
-      "status":      "PASS",
-      "lineQuality": "GOOD",
-      "noiseLevel":  -55,
-      "testedAt":    "2026-04-12T10:05:18.000Z"
-    }
+    "name": "runVoiceDiagnostic",
+    "code": "VOICE_SERVICE_DIAGNOSTIC",
+    "id":   "tf-9a1b",
+    "type": "TaskFlow",
+    "taskResult": {
+      "voiceDiagnostic": {
+        "status":      "PASS",
+        "lineQuality": "GOOD",
+        "noiseLevel":  -55,
+        "testedAt":    "2026-04-12T10:05:18.000Z"
+      }
+    },
+    "taskFlowResponse": {
+      "id":    "tf-9a1b",
+      "href":  "https://tmf-process-flow.../processFlow/bbf5e84d-.../taskFlow/tf-9a1b",
+      "@type": "TaskFlow",
+      "state": "completed",
+      "characteristic": [
+        { "name": "outcome",     "value": "PASS" },
+        { "name": "lineQuality", "value": "GOOD" },
+        { "name": "noiseLevel",  "value": "-55", "valueType": "Integer" }
+      ]
+    },
+    "taskStatusCode": "COMPLETED"
   },
   "error": null
 }

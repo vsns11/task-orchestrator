@@ -18,7 +18,7 @@ endif
 # Infrastructure
 # ============================================================================
 
-## Start PostgreSQL + Kafka + Kafka UI using Docker
+## Start PostgreSQL + Kafka using Docker
 docker-up:
 	docker compose up -d
 
@@ -26,7 +26,7 @@ docker-up:
 docker-down:
 	docker compose down -v
 
-## Start PostgreSQL + Kafka + Kafka UI using Podman
+## Start PostgreSQL + Kafka using Podman
 ## Works with both:
 ##   - 'podman compose' (built into Podman Desktop, no Python needed)
 ##   - 'podman-compose' (pip install, needs Python)
@@ -131,6 +131,5 @@ help:
 	@echo "    curl -X POST http://localhost:8080/demo/start"
 	@echo "    curl http://localhost:8080/demo/barriers"
 	@echo "    curl http://localhost:8080/demo/tasks"
-	@echo "    Kafka UI: http://localhost:9091"
 	@echo "    DBeaver:  localhost:5433 / orchestrator / orchestrator"
 	@echo ""

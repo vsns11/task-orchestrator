@@ -211,7 +211,9 @@ class BarrierServiceTest {
                 .actionName("testAction").actionCode("TEST_ACTION").build());
         taskCommand.setResult(ActionResponse.builder()
                 .name("testAction").code("TEST_ACTION").id("tf-1").type("TaskFlow")
-                .taskFlowResult(Map.of("id", "tf-1", "href", "http://mock/tf-1"))
+                .taskResult(Map.of("downstream", "ok"))
+                .taskFlowResponse(ca.siva.orchestrator.dto.tmf.TaskFlow.builder()
+                        .id("tf-1").href("http://mock/tf-1").build())
                 .taskStatusCode("COMPLETED").build());
         return taskCommand;
     }
