@@ -7,6 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.core.env.Environment;
+import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
@@ -41,9 +42,9 @@ public class Tmf701Client {
     private static final String RELATED_ENTITY_TYPE = "RelatedEntity";
     private static final String STATE_FIELD         = "state";
 
-    private final Tmf701Properties props;
+    private final Tmf701Properties   props;
     private final RestClient.Builder builder;
-    private final Environment environment;
+    private final Environment        environment;
 
     private RestClient client;
 
@@ -51,9 +52,21 @@ public class Tmf701Client {
     @EventListener(ApplicationReadyEvent.class)
     public void init() {
         String baseUrl = resolveBaseUrl();
-        this.client = builder.baseUrl(baseUrl).build();
-        log.info("TMF-701 client initialized with base URL: {} processFlowPath: {}",
-                baseUrl, props.processFlowPath());
+        RestClient.Builder b = builder.baseUrl(baseUrl);
+
+        // Shared FID credentials read directly from the process environment
+        // (FID_USERNAME / FID_PASSWORD). Same pair is reused by ActionRegistry.
+        // When either env var is blank we skip the Authorization header entirely —
+        // useful for local-dev against the in-process mocks and integration tests.
+        String authHeader = BasicAuthSupport.fidHeader();
+        if (authHeader != null) {
+            b.defaultHeader(HttpHeaders.AUTHORIZATION, authHeader);
+        }
+
+        this.client = b.build();
+        log.info("TMF-701 client initialized: baseUrl={} processFlowPath={} basicAuth={}",
+                baseUrl, props.processFlowPath(),
+                authHeader != null ? "enabled (user=" + BasicAuthSupport.fidUsername() + ")" : "disabled");
     }
 
     /** Registers a taskFlow reference on the parent processFlow via PATCH. */

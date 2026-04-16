@@ -1,5 +1,6 @@
 package ca.siva.orchestrator.actionregistry;
 
+import ca.siva.orchestrator.client.BasicAuthSupport;
 import ca.siva.orchestrator.config.ActionRegistryProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -7,6 +8,7 @@ import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.core.env.Environment;
+import org.springframework.http.HttpHeaders;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -78,18 +80,32 @@ public class ActionRegistry {
 
     /**
      * Loads both APIs and populates the two maps.
+     *
+     * <p>The RestClient is rebuilt on every reload so env-var changes to the
+     * credentials are picked up on the next scheduled refresh without a restart.
+     * Credentials are read directly from the process environment
+     * ({@code FID_USERNAME} / {@code FID_PASSWORD}, same pair used by the
+     * TMF-701 client); blank values disable the Authorization header (used for
+     * local-dev mocks and integration tests).</p>
      */
     public void reload() {
         String baseUrl = resolveBaseUrl();
-        RestClient client = builder.baseUrl(baseUrl).build();
+        RestClient.Builder b = builder.baseUrl(baseUrl);
+
+        String authHeader = BasicAuthSupport.fidHeader();
+        if (authHeader != null) {
+            b.defaultHeader(HttpHeaders.AUTHORIZATION, authHeader);
+        }
+        RestClient client = b.build();
 
         try {
             loadActionCodes(client);
             loadDcxActionCodes(client);
             ready = true;
 
-            log.info("Action registry loaded: {} action codes, {} dcx codes from {}",
-                    actionCodesByName.size(), dcxCodesByActionCode.size(), baseUrl);
+            log.info("Action registry loaded: {} action codes, {} dcx codes from {} (basicAuth={})",
+                    actionCodesByName.size(), dcxCodesByActionCode.size(), baseUrl,
+                    authHeader != null ? "enabled (user=" + BasicAuthSupport.fidUsername() + ")" : "disabled");
         } catch (Exception e) {
             log.error("Failed to load action registry from {}: {}", baseUrl, e.getMessage(), e);
         }

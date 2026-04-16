@@ -8,6 +8,17 @@ spring:
     activate:
       on-profile: orchestration
 
+# Basic-auth credentials for the action-registry and TMF-701 HTTP clients
+# are NOT bound in yml. They are read at runtime directly from the process
+# environment via BasicAuthSupport.fidHeader():
+#
+#   FID_USERNAME  — Basic-auth username (shared FID service account)
+#   FID_PASSWORD  — Basic-auth password
+#
+# Blank/unset env vars disable the Authorization header entirely, which is
+# the default locally (the in-process mocks accept anonymous traffic) and in
+# integration tests.
+
 orchestrator:
   dag:
     location: classpath:dag/
