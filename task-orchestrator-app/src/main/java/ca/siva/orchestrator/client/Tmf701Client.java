@@ -1,5 +1,6 @@
 package ca.siva.orchestrator.client;
 
+import ca.siva.orchestrator.config.FidCredentialsProperties;
 import ca.siva.orchestrator.config.Tmf701Properties;
 import ca.siva.orchestrator.dto.tmf.ProcessFlow;
 import lombok.RequiredArgsConstructor;
@@ -42,9 +43,10 @@ public class Tmf701Client {
     private static final String RELATED_ENTITY_TYPE = "RelatedEntity";
     private static final String STATE_FIELD         = "state";
 
-    private final Tmf701Properties   props;
-    private final RestClient.Builder builder;
-    private final Environment        environment;
+    private final Tmf701Properties         props;
+    private final FidCredentialsProperties fidCreds;
+    private final RestClient.Builder       builder;
+    private final Environment              environment;
 
     private RestClient client;
 
@@ -54,11 +56,13 @@ public class Tmf701Client {
         String baseUrl = resolveBaseUrl();
         RestClient.Builder b = builder.baseUrl(baseUrl);
 
-        // Shared FID credentials read directly from the process environment
-        // (FID_USERNAME / FID_PASSWORD). Same pair is reused by ActionRegistry.
-        // When either env var is blank we skip the Authorization header entirely —
-        // useful for local-dev against the in-process mocks and integration tests.
-        String authHeader = BasicAuthSupport.fidHeader();
+        // Shared FID credentials resolved by Spring from application-orchestration.yml:
+        //   orchestrator.fid.username = ${FID_USERNAME:}
+        //   orchestrator.fid.password = ${FID_PASSWORD:}
+        // Same pair is reused by ActionRegistry. When either is blank we skip the
+        // Authorization header entirely — useful for local-dev against the
+        // in-process mocks and for integration tests.
+        String authHeader = BasicAuthSupport.header(fidCreds.username(), fidCreds.password());
         if (authHeader != null) {
             b.defaultHeader(HttpHeaders.AUTHORIZATION, authHeader);
         }
@@ -66,7 +70,7 @@ public class Tmf701Client {
         this.client = b.build();
         log.info("TMF-701 client initialized: baseUrl={} processFlowPath={} basicAuth={}",
                 baseUrl, props.processFlowPath(),
-                authHeader != null ? "enabled (user=" + BasicAuthSupport.fidUsername() + ")" : "disabled");
+                authHeader != null ? "enabled (user=" + fidCreds.username() + ")" : "disabled");
     }
 
     /** Registers a taskFlow reference on the parent processFlow via PATCH. */

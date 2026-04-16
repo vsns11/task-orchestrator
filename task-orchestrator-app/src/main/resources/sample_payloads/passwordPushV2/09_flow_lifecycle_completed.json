@@ -1,11 +1,10 @@
 {
-  "eventId": "b3b3b3b3-aaaa-4bbb-8ccc-00000000008a",
+  "eventId": "b3b3b3b3-aaaa-4bbb-8ccc-000000000009",
   "correlationId": "11111111-aaaa-4bbb-8ccc-000000000001",
   "schemaVersion": "1.0",
-  "eventTime": "2026-04-15T14:00:00.260Z",
+  "eventTime": "2026-04-15T14:00:01.750Z",
   "messageType": "EVENT",
   "messageName": "flow.lifecycle",
   "source": "task-orchestrator",
-  "dagKey": "passwordPushV2",
-  "status": "INITIAL"
+  "status": "COMPLETED"
 }

@@ -51,13 +51,13 @@ Correlation ID: `11111111-aaaa-4bbb-8ccc-000000000001`
 |---|------|-------|---------------------|
 | 01 | `01_processflow_created_notification.json` | `notification.management` | TMF-701 → pamconsumer |
 | 02 | `02_processflow_initiated.json`            | `task.command`            | pamconsumer → task-orchestrator |
-| 08a| `08a_flow_lifecycle_initial.json`          | `task.command`            | task-orchestrator → (observers) |
-| 03 | `03_task_execute_async.json`               | `task.command`            | task-orchestrator → task-runner |
-| 04 | `04_task_event_waiting.json`               | `task.command`            | task-runner → task-orchestrator |
-| 05 | `05_async_response_notification.json`      | `notification.management` | external system → pamconsumer |
-| 06 | `06_task_signal.json`                      | `task.command`            | pamconsumer → task-runner |
-| 07 | `07_task_event_completed.json`             | `task.command`            | task-runner → task-orchestrator |
-| 08b| `08b_flow_lifecycle_completed.json`        | `task.command`            | task-orchestrator → (observers) |
+| 03 | `03_flow_lifecycle_initial.json`           | `task.command`            | task-orchestrator → (observers) |
+| 04 | `04_task_execute_async.json`               | `task.command`            | task-orchestrator → task-runner |
+| 05 | `05_task_event_waiting.json`               | `task.command`            | task-runner → task-orchestrator |
+| 06 | `06_async_response_notification.json`      | `notification.management` | external system → pamconsumer |
+| 07 | `07_task_signal.json`                      | `task.command`            | pamconsumer → task-runner |
+| 08 | `08_task_event_completed.json`             | `task.command`            | task-runner → task-orchestrator |
+| 09 | `09_flow_lifecycle_completed.json`         | `task.command`            | task-orchestrator → (observers) |
 
 ---
 
@@ -74,13 +74,13 @@ Correlation ID: `22222222-bbbb-4ccc-8ddd-000000000001`
 |---|------|-------|---------------------|
 | 01 | `01_processflow_created_notification.json` | `notification.management` | TMF-701 → pamconsumer |
 | 02 | `02_processflow_initiated.json`            | `task.command`            | pamconsumer → task-orchestrator |
-| 08a| `08a_flow_lifecycle_initial.json`          | `task.command`            | task-orchestrator → (observers) |
-| 03 | `03_task_execute_async.json`               | `task.command`            | task-orchestrator → task-runner |
-| 04 | `04_task_event_waiting.json`               | `task.command`            | task-runner → task-orchestrator |
-| 05 | `05_async_response_notification.json`      | `notification.management` | external system → pamconsumer |
-| 06 | `06_task_signal.json`                      | `task.command`            | pamconsumer → task-runner |
-| 07 | `07_task_event_completed.json`             | `task.command`            | task-runner → task-orchestrator |
-| 08b| `08b_flow_lifecycle_completed.json`        | `task.command`            | task-orchestrator → (observers) |
+| 03 | `03_flow_lifecycle_initial.json`           | `task.command`            | task-orchestrator → (observers) |
+| 04 | `04_task_execute_async.json`               | `task.command`            | task-orchestrator → task-runner |
+| 05 | `05_task_event_waiting.json`               | `task.command`            | task-runner → task-orchestrator |
+| 06 | `06_async_response_notification.json`      | `notification.management` | external system → pamconsumer |
+| 07 | `07_task_signal.json`                      | `task.command`            | pamconsumer → task-runner |
+| 08 | `08_task_event_completed.json`             | `task.command`            | task-runner → task-orchestrator |
+| 09 | `09_flow_lifecycle_completed.json`         | `task.command`            | task-orchestrator → (observers) |
 
 ---
 
@@ -96,10 +96,10 @@ Correlation ID: `33333333-cccc-4ddd-8eee-000000000001`
 |---|------|-------|---------------------|
 | 01 | `01_processflow_created_notification.json` | `notification.management` | TMF-701 → pamconsumer |
 | 02 | `02_processflow_initiated.json`            | `task.command`            | pamconsumer → task-orchestrator |
-| 05a| `05a_flow_lifecycle_initial.json`          | `task.command`            | task-orchestrator → (observers) |
-| 03 | `03_task_execute_sync.json`                | `task.command`            | task-orchestrator → task-runner |
-| 04 | `04_task_event_completed.json`             | `task.command`            | task-runner → task-orchestrator |
-| 05b| `05b_flow_lifecycle_completed.json`        | `task.command`            | task-orchestrator → (observers) |
+| 03 | `03_flow_lifecycle_initial.json`           | `task.command`            | task-orchestrator → (observers) |
+| 04 | `04_task_execute_sync.json`                | `task.command`            | task-orchestrator → task-runner |
+| 05 | `05_task_event_completed.json`             | `task.command`            | task-runner → task-orchestrator |
+| 06 | `06_flow_lifecycle_completed.json`         | `task.command`            | task-orchestrator → (observers) |
 
 ---
 

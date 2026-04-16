@@ -2,6 +2,7 @@ package ca.siva.orchestrator.actionregistry;
 
 import ca.siva.orchestrator.client.BasicAuthSupport;
 import ca.siva.orchestrator.config.ActionRegistryProperties;
+import ca.siva.orchestrator.config.FidCredentialsProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -42,6 +43,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class ActionRegistry {
 
     private final ActionRegistryProperties props;
+    private final FidCredentialsProperties fidCreds;
     private final RestClient.Builder       builder;
     private final Environment              environment;
 
@@ -81,18 +83,18 @@ public class ActionRegistry {
     /**
      * Loads both APIs and populates the two maps.
      *
-     * <p>The RestClient is rebuilt on every reload so env-var changes to the
-     * credentials are picked up on the next scheduled refresh without a restart.
-     * Credentials are read directly from the process environment
-     * ({@code FID_USERNAME} / {@code FID_PASSWORD}, same pair used by the
-     * TMF-701 client); blank values disable the Authorization header (used for
+     * <p>Credentials come from {@link FidCredentialsProperties} (bound to
+     * {@code orchestrator.fid.*} in yml, which references the
+     * {@code FID_USERNAME} / {@code FID_PASSWORD} env vars). The RestClient is
+     * rebuilt on each reload so a fresh value is used on every scheduled
+     * refresh. Blank values disable the Authorization header (used for
      * local-dev mocks and integration tests).</p>
      */
     public void reload() {
         String baseUrl = resolveBaseUrl();
         RestClient.Builder b = builder.baseUrl(baseUrl);
 
-        String authHeader = BasicAuthSupport.fidHeader();
+        String authHeader = BasicAuthSupport.header(fidCreds.username(), fidCreds.password());
         if (authHeader != null) {
             b.defaultHeader(HttpHeaders.AUTHORIZATION, authHeader);
         }
@@ -105,7 +107,7 @@ public class ActionRegistry {
 
             log.info("Action registry loaded: {} action codes, {} dcx codes from {} (basicAuth={})",
                     actionCodesByName.size(), dcxCodesByActionCode.size(), baseUrl,
-                    authHeader != null ? "enabled (user=" + BasicAuthSupport.fidUsername() + ")" : "disabled");
+                    authHeader != null ? "enabled (user=" + fidCreds.username() + ")" : "disabled");
         } catch (Exception e) {
             log.error("Failed to load action registry from {}: {}", baseUrl, e.getMessage(), e);
         }

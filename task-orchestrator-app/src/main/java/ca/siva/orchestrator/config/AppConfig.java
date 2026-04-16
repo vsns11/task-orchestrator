@@ -25,7 +25,8 @@ import java.time.Duration;
         TopicsProperties.class,
         DagProperties.class,
         Tmf701Properties.class,
-        ActionRegistryProperties.class
+        ActionRegistryProperties.class,
+        FidCredentialsProperties.class
 })
 public class AppConfig {
 
