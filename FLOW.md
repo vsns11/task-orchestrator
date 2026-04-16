@@ -346,7 +346,7 @@ filter on.
     "id": "tf-ca72d013",
     "type": "TaskFlow",
     "taskResult": {
-      "outcome": "PASS",
+      "status": "pass",
       "diagnosticSummary": "All checks passed for runInternetCheck",
       "latencyMs": 245
     },
@@ -356,7 +356,7 @@ filter on.
       "@type": "TaskFlow",
       "state": "completed",
       "characteristic": [
-        { "name": "outcome", "value": "PASS" },
+        { "name": "status", "value": "pass" },
         { "name": "diagnosticSummary", "value": "All checks passed for runInternetCheck" }
       ]
     },
@@ -479,7 +479,7 @@ The `result` field is an `ActionResponse` with two payload slots:
     "id": "tf-31c94387",
     "type": "TaskFlow",
     "taskResult": {
-      "outcome": "PASS",
+      "status": "pass",
       "diagnosticSummary": "Async voice diagnostic completed successfully",
       "latencyMs": 1200
     },
@@ -489,7 +489,7 @@ The `result` field is an `ActionResponse` with two payload slots:
       "@type": "TaskFlow",
       "state": "completed",
       "characteristic": [
-        { "name": "outcome", "value": "PASS" },
+        { "name": "status", "value": "pass" },
         { "name": "diagnosticSummary", "value": "Async voice diagnostic completed successfully" }
       ]
     },
@@ -532,8 +532,8 @@ The `result` field is an `ActionResponse` with two payload slots:
   "inputs": {
     "processFlow": { "id": "bbf5e84d-...", "processFlowSpecification": "Auto_Remediation" },
     "dependencyResults": {
-      "runInternetCheck":   "{\"name\":\"runInternetCheck\",\"id\":\"tf-ca72d013\",\"taskResult\":{\"outcome\":\"PASS\"},\"taskFlowResponse\":{\"id\":\"tf-ca72d013\",\"href\":\"http://.../taskFlow/tf-ca72d013\",\"state\":\"completed\"},\"taskStatusCode\":\"COMPLETED\"}",
-      "runVoiceDiagnostic": "{\"name\":\"runVoiceDiagnostic\",\"id\":\"tf-31c94387\",\"taskResult\":{\"outcome\":\"PASS\"},\"taskFlowResponse\":{\"id\":\"tf-31c94387\",\"href\":\"http://.../taskFlow/tf-31c94387\",\"state\":\"completed\"},\"taskStatusCode\":\"COMPLETED\"}"
+      "runInternetCheck":   "{\"name\":\"runInternetCheck\",\"id\":\"tf-ca72d013\",\"taskResult\":{\"status\":\"pass\"},\"taskFlowResponse\":{\"id\":\"tf-ca72d013\",\"href\":\"http://.../taskFlow/tf-ca72d013\",\"state\":\"completed\"},\"taskStatusCode\":\"COMPLETED\"}",
+      "runVoiceDiagnostic": "{\"name\":\"runVoiceDiagnostic\",\"id\":\"tf-31c94387\",\"taskResult\":{\"status\":\"pass\"},\"taskFlowResponse\":{\"id\":\"tf-31c94387\",\"href\":\"http://.../taskFlow/tf-31c94387\",\"state\":\"completed\"},\"taskStatusCode\":\"COMPLETED\"}"
     }
   }
 }
@@ -566,7 +566,7 @@ The `result` field is an `ActionResponse` with two payload slots:
     "id": "tf-4b6b61e2",
     "type": "TaskFlow",
     "taskResult": {
-      "outcome": "PASS",
+      "status": "pass",
       "notificationSent": true
     },
     "taskFlowResponse": {
@@ -574,7 +574,7 @@ The `result` field is an `ActionResponse` with two payload slots:
       "href": "http://mock-tmf701/.../taskFlow/tf-4b6b61e2",
       "@type": "TaskFlow",
       "state": "completed",
-      "characteristic": [ { "name": "outcome", "value": "PASS" } ]
+      "characteristic": [ { "name": "status", "value": "pass" } ]
     },
     "taskStatusCode": "COMPLETED"
   }

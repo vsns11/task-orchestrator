@@ -23,7 +23,7 @@ import java.util.Objects;
  *
  * <p>Used as the value of {@code ActionResponse.taskFlowResponse} — it carries
  * the completed taskFlow's business result, with domain-specific outputs
- * (e.g. {@code outcome=PASS}, diagnostic summaries) surfaced as
+ * (e.g. {@code status=pass|fail}, diagnostic summaries) surfaced as
  * {@link ProcessFlow.Characteristic} entries per the TMF convention.</p>
  *
  * <p>The {@code Characteristic} and {@code RelatedEntity} inner types are reused
@@ -66,29 +66,14 @@ public class TaskFlow implements Serializable {
     private List<ProcessFlow.RelatedEntity> relatedEntity;
 
     /**
-     * Name/value pairs. Domain outputs (outcome, diagnosticSummary, latencyMs, …)
-     * are represented as characteristics, per TMF convention.
+     * Name/value pairs. Domain outputs (status, diagnosticSummary, latencyMs, …)
+     * are represented as characteristics, per TMF convention. The orchestrator
+     * rejects a COMPLETED task.event when the {@code status} characteristic
+     * exists and is not {@code pass} (case-insensitive).
      */
     private List<ProcessFlow.Characteristic> characteristic;
 
     private List<TaskFlowRelationship> taskFlowRelationship;
-
-    /**
-     * Convenience: returns the value of the first characteristic with the given
-     * name (case-insensitive), or {@code null} if none exists. Does NOT throw
-     * on missing/empty lists — safe to call on sparsely populated responses.
-     */
-    public String findCharacteristic(String name) {
-        if (characteristic == null || name == null) {
-            return null;
-        }
-        for (ProcessFlow.Characteristic c : characteristic) {
-            if (c != null && name.equalsIgnoreCase(c.getName())) {
-                return c.getValue();
-            }
-        }
-        return null;
-    }
 
     /** TMF-701 {@code TaskFlowRelationship} — link to another taskFlow. */
     @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder

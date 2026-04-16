@@ -27,7 +27,7 @@
     "id": "tf-pwr-b1",
     "type": "TaskFlow",
     "taskResult": {
-      "outcome": "PASS",
+      "status": "pass",
       "resetAt": "2026-04-15T14:05:03.100Z",
       "targetSystem": "okta",
       "userId": "user-00456",
@@ -39,7 +39,7 @@
       "@type": "TaskFlow",
       "state": "completed",
       "characteristic": [
-        { "name": "outcome",               "value": "PASS",         "valueType": "String" },
+        { "name": "status",                "value": "pass",         "valueType": "String" },
         { "name": "targetSystem",          "value": "okta",         "valueType": "String" },
         { "name": "userId",                "value": "user-00456",   "valueType": "String" },
         { "name": "notificationEmailSent", "value": "true",         "valueType": "Boolean" }

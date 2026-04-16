@@ -29,7 +29,7 @@ import java.util.Map;
  *       payload can flow through without forcing a schema change.</li>
  *   <li>{@link #taskFlowResponse} — strongly typed TMF-701
  *       {@link TaskFlow} resource with state + characteristics carrying the
- *       domain outputs (outcome, diagnostic details, etc.).</li>
+ *       domain outputs (status, diagnostic details, etc.).</li>
  * </ul>
  */
 @Getter
@@ -59,7 +59,7 @@ public class ActionResponse implements Serializable {
 
     /**
      * TMF-701 {@link TaskFlow} resource carrying the task-runner's business result.
-     * Domain-specific outputs (outcome, diagnosticSummary, etc.) are surfaced as
+     * Domain-specific outputs (status, diagnosticSummary, etc.) are surfaced as
      * {@code characteristic} entries per TMF convention, not as ad-hoc fields.
      */
     private TaskFlow taskFlowResponse;

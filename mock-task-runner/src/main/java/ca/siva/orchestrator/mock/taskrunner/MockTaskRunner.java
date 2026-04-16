@@ -148,7 +148,7 @@ public class MockTaskRunner {
                 .map(Action::getActionCode).orElse(UNKNOWN);
 
         Map<String, Object> downstreamResult = Map.of(
-                "outcome", "PASS",
+                "status", "pass",
                 "diagnosticSummary", "Async diagnostic completed successfully",
                 "latencyMs", 1200,
                 "checksRun", 5,
@@ -213,7 +213,7 @@ public class MockTaskRunner {
      *       {@code JsonNode} or a domain DTO deserialized from the downstream
      *       HTTP/Kafka response).</li>
      *   <li>{@code taskFlowResponse} — typed TMF-701 {@link TaskFlow}; domain outputs
-     *       ({@code outcome}, {@code diagnosticSummary}, …) are emitted as
+     *       ({@code status}, {@code diagnosticSummary}, …) are emitted as
      *       {@link ProcessFlow.Characteristic} name/value pairs per TMF convention.</li>
      * </ul>
      */

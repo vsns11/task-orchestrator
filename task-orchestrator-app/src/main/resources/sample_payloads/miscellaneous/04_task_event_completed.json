@@ -27,7 +27,7 @@
     "id": "tf-misc-c1",
     "type": "TaskFlow",
     "taskResult": {
-      "outcome": "PASS",
+      "status": "pass",
       "processedAt": "2026-04-15T14:10:00.640Z",
       "context": "manual-ops-run"
     },
@@ -37,7 +37,7 @@
       "@type": "TaskFlow",
       "state": "completed",
       "characteristic": [
-        { "name": "outcome", "value": "PASS",            "valueType": "String" },
+        { "name": "status",  "value": "pass",            "valueType": "String" },
         { "name": "context", "value": "manual-ops-run",  "valueType": "String" }
       ]
     },

@@ -61,7 +61,7 @@ public class DownstreamCaller {
                     if (attempt >= retryProperties.getMaxAttempts()) {
                         log.warn("Downstream call for {} failed after {} attempts with status {}",
                                 actionName, attempt, statusCode);
-                        return Map.of("status", "FAILED", "httpStatus", statusCode, "attempt", attempt);
+                        return Map.of("status", "fail", "httpStatus", statusCode, "attempt", attempt);
                     }
                     log.info("Downstream call for {} returned {} — retrying (attempt {}/{})",
                             actionName, statusCode, attempt, retryProperties.getMaxAttempts());
@@ -69,14 +69,14 @@ public class DownstreamCaller {
                 } else {
                     // Non-retryable error — fail immediately
                     log.warn("Downstream call for {} failed with non-retryable status {}", actionName, statusCode);
-                    return Map.of("status", "FAILED", "httpStatus", statusCode, "attempt", attempt);
+                    return Map.of("status", "fail", "httpStatus", statusCode, "attempt", attempt);
                 }
 
             } catch (Exception e) {
                 if (attempt >= retryProperties.getMaxAttempts()) {
                     log.warn("Downstream call for {} threw exception after {} attempts: {}",
                             actionName, attempt, e.getMessage());
-                    return Map.of("status", "FAILED", "error", e.getMessage(), "attempt", attempt);
+                    return Map.of("status", "fail", "error", e.getMessage(), "attempt", attempt);
                 }
                 log.info("Downstream call for {} threw {} — retrying (attempt {}/{})",
                         actionName, e.getClass().getSimpleName(), attempt, retryProperties.getMaxAttempts());
@@ -93,7 +93,7 @@ public class DownstreamCaller {
      */
     private Map<String, Object> buildRefinedResponse(String actionName, String downstreamUrl) {
         return Map.of(
-                "outcome", "PASS",
+                "status", "pass",
                 "diagnosticSummary", "All checks passed for " + actionName,
                 "latencyMs", 245,
                 "checksRun", 3,

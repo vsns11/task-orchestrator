@@ -143,7 +143,7 @@ slots:
 | Slot              | Type                    | Contents |
 |-------------------|-------------------------|----------|
 | `taskResult`      | `Object` (free-form)    | Raw downstream response body — `JsonNode`, `Map`, or a domain DTO. Whatever the runner received from the downstream call. Used for `dependencyResults` pass-through and audit. |
-| `taskFlowResponse`| TMF-701 `TaskFlow`      | Typed: `id`, `href`, `state`, `characteristic[]`. The orchestrator reads `href` here to PATCH the parent processFlow. Domain outputs (`outcome`, …) should also be emitted here as `characteristic` entries per TMF convention. |
+| `taskFlowResponse`| TMF-701 `TaskFlow`      | Typed: `id`, `href`, `state`, `characteristic[]`. The orchestrator reads `href` here to PATCH the parent processFlow, and iterates `characteristic[]` looking for a `status` entry — if present and not `pass` (case-insensitive), the COMPLETED event is rejected and the flow is failed. Domain outputs (`status`, `diagnosticSummary`, …) are emitted here as `characteristic` entries per TMF convention. |
 
 ---
 

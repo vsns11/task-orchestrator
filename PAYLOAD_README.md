@@ -459,7 +459,7 @@ The runner emits **one** event for the entire SYNC lifecycle. The orchestrator s
       "@type": "TaskFlow",
       "state": "completed",
       "characteristic": [
-        { "name": "outcome",          "value": "PASS" },
+        { "name": "status",           "value": "pass" },
         { "name": "diagnosticResult", "value": "OK"   }
       ]
     },
@@ -651,7 +651,7 @@ An ASYNC action requires **three messages** across **two runner invocations**, s
     "type": "TaskFlow",
     "taskResult": {
       "voiceDiagnostic": {
-        "status":      "PASS",
+        "status":      "pass",
         "lineQuality": "GOOD",
         "noiseLevel":  -55,
         "testedAt":    "2026-04-12T10:05:18.000Z"
@@ -663,7 +663,7 @@ An ASYNC action requires **three messages** across **two runner invocations**, s
       "@type": "TaskFlow",
       "state": "completed",
       "characteristic": [
-        { "name": "outcome",     "value": "PASS" },
+        { "name": "status",      "value": "pass" },
         { "name": "lineQuality", "value": "GOOD" },
         { "name": "noiseLevel",  "value": "-55", "valueType": "Integer" }
       ]

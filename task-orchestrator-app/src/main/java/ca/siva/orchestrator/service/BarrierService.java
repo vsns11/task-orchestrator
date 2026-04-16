@@ -55,9 +55,10 @@ public class BarrierService {
     /** ActionResponse taskStatusCode values — anything other than COMPLETED is treated as a failure. */
     private static final String TASK_STATUS_COMPLETED = "COMPLETED";
 
-    /** Characteristic name carrying the pass/fail outcome on the TMF-701 TaskFlow response. */
-    private static final String OUTCOME_CHARACTERISTIC = "outcome";
-    private static final String OUTCOME_PASS           = "PASS";
+    /** Characteristic name carrying the pass/fail status on the TMF-701 TaskFlow response. */
+    private static final String STATUS_CHARACTERISTIC = "status";
+    /** Expected value of the {@code status} characteristic for a passing action. */
+    private static final String STATUS_PASS           = "pass";
 
     /** Unknown identifier used in log messages when a field is absent. */
     private static final String UNKNOWN = "?";
@@ -165,7 +166,7 @@ public class BarrierService {
         }
 
         // Validate actionResponse: even though the task-runner reports COMPLETED,
-        // the business outcome inside actionResponse may indicate failure.
+        // the business status inside actionResponse may indicate failure.
         Optional<String> rejectReason = validateActionResponse(taskCommand);
         if (rejectReason.isPresent()) {
             log.error("Rejecting COMPLETED for flow={} action={}: {}",
@@ -389,7 +390,7 @@ public class BarrierService {
      * Validates the {@link ActionResponse} attached to a COMPLETED task.event.
      * A task-runner can report COMPLETED at the envelope level while the embedded
      * actionResponse indicates a business failure (non-COMPLETED taskStatusCode
-     * or non-PASS outcome in taskFlowResponse).
+     * or non-pass status characteristic in taskFlowResponse).
      *
      * @return reason string if the result should be rejected, or empty if it's valid
      */
@@ -405,10 +406,16 @@ public class BarrierService {
         }
 
         TaskFlow taskFlowResponse = result.getTaskFlowResponse();
-        if (taskFlowResponse != null) {
-            String outcome = taskFlowResponse.findCharacteristic(OUTCOME_CHARACTERISTIC);
-            if (outcome != null && !OUTCOME_PASS.equalsIgnoreCase(outcome)) {
-                return Optional.of("actionResponse.taskFlowResponse.outcome=" + outcome);
+        if (taskFlowResponse != null && taskFlowResponse.getCharacteristic() != null) {
+            for (ProcessFlow.Characteristic c : taskFlowResponse.getCharacteristic()) {
+                if (c == null || !STATUS_CHARACTERISTIC.equalsIgnoreCase(c.getName())) {
+                    continue;
+                }
+                String status = c.getValue();
+                if (status != null && !STATUS_PASS.equalsIgnoreCase(status)) {
+                    return Optional.of("actionResponse.taskFlowResponse.status=" + status);
+                }
+                break;
             }
         }
 
