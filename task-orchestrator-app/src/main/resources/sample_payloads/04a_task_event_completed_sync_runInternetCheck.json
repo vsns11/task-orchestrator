@@ -1,0 +1,43 @@
+{
+  "eventId": "a1b2c3d4-4444-4aaa-bbbb-000000000004",
+  "correlationId": "bbf5e84d-9c3a-4e7b-a1f2-3d6e8f0a1b2c",
+  "schemaVersion": "1.0",
+  "eventTime": "2026-04-15T14:00:01.350Z",
+  "messageType": "EVENT",
+  "messageName": "task.event",
+  "source": "task-runner",
+  "status": "COMPLETED",
+  "action": {
+    "actionName": "runInternetCheck",
+    "actionCode": "INTERNET_SERVICE_CHECK",
+    "dcxActionCode": "DCX-INT-01"
+  },
+  "batch": {
+    "index": 0
+  },
+  "execution": {
+    "mode": "SYNC",
+    "startedAt": "2026-04-15T14:00:00.350Z",
+    "finishedAt": "2026-04-15T14:00:01.350Z",
+    "durationMs": 1000
+  },
+  "result": {
+    "name": "runInternetCheck",
+    "code": "INTERNET_SERVICE_CHECK",
+    "id": "tf-ca72d013",
+    "type": "TaskFlow",
+    "taskFlowResult": {
+      "id": "tf-ca72d013",
+      "href": "https://tmf-process-flow.example.com/tmf-api/processFlowManagement/v4/processFlow/bbf5e84d-9c3a-4e7b-a1f2-3d6e8f0a1b2c/taskFlow/tf-ca72d013"
+    },
+    "taskFlowResponse": {
+      "outcome": "PASS",
+      "diagnosticSummary": "All checks passed for runInternetCheck",
+      "latencyMs": 245,
+      "checksRun": 3,
+      "checksPassed": 3,
+      "checksFailed": 0
+    },
+    "taskStatusCode": "COMPLETED"
+  }
+}

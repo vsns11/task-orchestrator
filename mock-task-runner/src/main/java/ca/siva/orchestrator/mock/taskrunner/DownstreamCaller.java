@@ -3,6 +3,7 @@ package ca.siva.orchestrator.mock.taskrunner;
 import ca.siva.orchestrator.mock.taskrunner.config.TaskRunnerRetryProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
@@ -24,6 +25,7 @@ import java.util.Map;
 @Slf4j
 @Component
 @RequiredArgsConstructor
+@Profile("local-dev")
 public class DownstreamCaller {
 
     private final TaskRunnerRetryProperties retryProperties;
@@ -49,9 +51,9 @@ public class DownstreamCaller {
                 int statusCode = simulateDownstreamResponse();
 
                 if (statusCode >= 200 && statusCode < 300) {
-                    // Success
+                    // Success — return a realistic refined response
                     log.debug("Downstream call for {} succeeded on attempt {}", actionName, attempt);
-                    return Map.of("status", "OK", "attempt", attempt);
+                    return buildRefinedResponse(actionName, downstreamUrl);
                 }
 
                 if (retryProperties.getRetryableStatusCodes().contains(statusCode)) {
@@ -81,6 +83,23 @@ public class DownstreamCaller {
                 sleep(retryProperties.getBackoffMs());
             }
         }
+    }
+
+    /**
+     * Builds a realistic refined response simulating what the downstream system returns.
+     *
+     * <p>In production, this is the actual HTTP response body from the downstream
+     * service (diagnostics engine, notification gateway, etc.).</p>
+     */
+    private Map<String, Object> buildRefinedResponse(String actionName, String downstreamUrl) {
+        return Map.of(
+                "outcome", "PASS",
+                "diagnosticSummary", "All checks passed for " + actionName,
+                "latencyMs", 245,
+                "checksRun", 3,
+                "checksPassed", 3,
+                "checksFailed", 0
+        );
     }
 
     /**

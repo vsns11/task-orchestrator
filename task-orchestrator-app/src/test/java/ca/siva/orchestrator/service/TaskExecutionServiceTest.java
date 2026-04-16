@@ -1,5 +1,6 @@
 package ca.siva.orchestrator.service;
 
+import ca.siva.orchestrator.dto.ActionResponse;
 import ca.siva.orchestrator.dto.TaskCommand;
 import ca.siva.orchestrator.entity.TaskExecution;
 import ca.siva.orchestrator.entity.TaskExecutionId;
@@ -14,7 +15,6 @@ import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.Instant;
-import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -32,7 +32,7 @@ class TaskExecutionServiceTest {
     void upsert_newExecution_savesCorrectly() {
         when(repo.findById(any(TaskExecutionId.class))).thenReturn(Optional.empty());
 
-        var testCommand = fullTaskEvent();
+        var testCommand = buildTaskCommand();
         service.upsert(testCommand);
 
         var captor = ArgumentCaptor.forClass(TaskExecution.class);
@@ -41,28 +41,30 @@ class TaskExecutionServiceTest {
         TaskExecution saved = captor.getValue();
         assertThat(saved.getActionName()).isEqualTo("testAction");
         assertThat(saved.getActionCode()).isEqualTo("TEST_ACTION");
-        assertThat(saved.getStatus()).isEqualTo(ca.siva.orchestrator.domain.TaskStatus.COMPLETED.name());
+        assertThat(saved.getStatus()).isEqualTo(ca.siva.orchestrator.domain.TaskStatus.COMPLETED);
     }
 
     @Test
-    void upsert_existingExecution_updatesStatus() {
+    void upsert_existingExecution_updatesStatus_withoutExplicitSave() {
         var existing = new TaskExecution();
-        existing.setId(new TaskExecutionId("corr-1", "tf-1", (short) 1));
-        existing.setStatus("IN_PROGRESS");
+        existing.setId(new TaskExecutionId("corr-1", "tf-1"));
+        existing.setStatus(ca.siva.orchestrator.domain.TaskStatus.IN_PROGRESS);
         when(repo.findById(any())).thenReturn(Optional.of(existing));
 
-        var testCommand = fullTaskEvent();
+        var testCommand = buildTaskCommand();
         service.upsert(testCommand);
 
-        verify(repo).save(existing);
-        assertThat(existing.getStatus()).isEqualTo(ca.siva.orchestrator.domain.TaskStatus.COMPLETED.name());
+        // For existing managed entities, dirty-checking handles the UPDATE at commit.
+        // No explicit save() needed.
+        verify(repo, never()).save(any());
+        assertThat(existing.getStatus()).isEqualTo(ca.siva.orchestrator.domain.TaskStatus.COMPLETED);
     }
 
     @Test
-    void upsert_nullTask_returnsEarly() {
+    void upsert_nullResult_returnsEarly() {
         var testCommand = new TaskCommand();
         testCommand.setCorrelationId("corr-1");
-        // task is null
+        // result is null — no taskFlowId available
 
         service.upsert(testCommand);
 
@@ -70,29 +72,13 @@ class TaskExecutionServiceTest {
     }
 
     @Test
-    void upsert_withDownstream_setsFields() {
-        when(repo.findById(any())).thenReturn(Optional.empty());
-
-        var testCommand = fullTaskEvent();
-        testCommand.setDownstream(TaskCommand.Downstream.builder()
-                .id("ds-1").href("http://ds/1").build());
-
-        service.upsert(testCommand);
-
-        var captor = ArgumentCaptor.forClass(TaskExecution.class);
-        verify(repo).save(captor.capture());
-        assertThat(captor.getValue().getDownstreamId()).isEqualTo("ds-1");
-        assertThat(captor.getValue().getDownstreamHref()).isEqualTo("http://ds/1");
-    }
-
-    @Test
     void upsert_withExecution_setsTimingFields() {
         when(repo.findById(any())).thenReturn(Optional.empty());
 
         Instant now = Instant.now();
-        var testCommand = fullTaskEvent();
+        var testCommand = buildTaskCommand();
         testCommand.setExecution(TaskCommand.Execution.builder()
-                .mode(ca.siva.orchestrator.domain.ExecutionMode.SYNC).attempt(1).startedAt(now).finishedAt(now).durationMs(500L)
+                .mode(ca.siva.orchestrator.domain.ExecutionMode.SYNC).startedAt(now).finishedAt(now).durationMs(500L)
                 .build());
 
         service.upsert(testCommand);
@@ -103,15 +89,16 @@ class TaskExecutionServiceTest {
         assertThat(captor.getValue().getDurationMs()).isEqualTo(500L);
     }
 
-    private static TaskCommand fullTaskEvent() {
+    private static TaskCommand buildTaskCommand() {
         var testCommand = new TaskCommand();
         testCommand.setCorrelationId("corr-1");
         testCommand.setStatus(ca.siva.orchestrator.domain.TaskStatus.COMPLETED);
-        testCommand.setTask(TaskCommand.Task.builder().id("tf-1").build());
         testCommand.setAction(TaskCommand.Action.builder()
                 .actionName("testAction").actionCode("TEST_ACTION").build());
         testCommand.setBatch(TaskCommand.Batch.builder().index(0).build());
-        testCommand.setResult(Map.of("key", "value"));
+        testCommand.setResult(ActionResponse.builder()
+                .name("testAction").code("TEST_ACTION").id("tf-1").type("TaskFlow")
+                .taskStatusCode("COMPLETED").build());
         return testCommand;
     }
 }

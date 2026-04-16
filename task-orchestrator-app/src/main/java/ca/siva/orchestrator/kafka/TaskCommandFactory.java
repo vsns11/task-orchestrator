@@ -3,13 +3,14 @@ package ca.siva.orchestrator.kafka;
 import ca.siva.orchestrator.actionregistry.ActionDefinition;
 import ca.siva.orchestrator.actionregistry.ActionRegistry;
 import ca.siva.orchestrator.dag.DagDefinition;
-import ca.siva.orchestrator.domain.MessageNames;
+import ca.siva.orchestrator.domain.MessageName;
 import ca.siva.orchestrator.domain.ExecutionMode;
 import ca.siva.orchestrator.domain.Intent;
 import ca.siva.orchestrator.domain.MessageType;
 import ca.siva.orchestrator.domain.Sources;
 import ca.siva.orchestrator.dto.TaskCommand;
 import ca.siva.orchestrator.dto.TaskCommand.Action;
+import ca.siva.orchestrator.dto.tmf.ProcessFlow;
 import ca.siva.orchestrator.dto.TaskCommand.Batch;
 import ca.siva.orchestrator.dto.TaskCommand.Execution;
 import ca.siva.orchestrator.dto.TaskCommand.Inputs;
@@ -65,13 +66,13 @@ public class TaskCommandFactory {
      * @param dagKey            DAG identifier
      * @param batch             the batch this action belongs to
      * @param actionDef         action definition from the DAG
-     * @param processFlow       original processFlow payload
+     * @param processFlow       the TMF-701 processFlow object (fetched via GET API)
      * @param dependencyResults results from actions this task depends on (keyed by actionName), or null
      */
     public Optional<TaskCommand> buildTaskExecute(String correlationId, String dagKey,
                                                            DagDefinition.BatchDef batch,
                                                            DagDefinition.ActionDef actionDef,
-                                                           Map<String, Object> processFlow,
+                                                           ProcessFlow processFlow,
                                                            Map<String, Object> dependencyResults) {
         // Chained lookup: actionName → actionCode → dcxActionCode
         Optional<ActionDefinition> resolvedOpt = actionRegistry.resolve(actionDef.getActionName());
@@ -81,7 +82,7 @@ public class TaskCommandFactory {
         }
         ActionDefinition actionIdentity = resolvedOpt.get();
 
-        TaskCommand taskCommand = buildBase(correlationId, MessageNames.TASK_EXECUTE,
+        TaskCommand taskCommand = buildBase(correlationId, MessageName.TASK_EXECUTE.getValue(),
                 MessageType.COMMAND, Sources.TASK_ORCHESTRATOR);
         taskCommand.setIntent(Intent.EXECUTE);
         taskCommand.setDagKey(dagKey);

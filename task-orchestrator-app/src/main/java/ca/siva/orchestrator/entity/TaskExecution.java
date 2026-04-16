@@ -1,7 +1,10 @@
 package ca.siva.orchestrator.entity;
 
+import ca.siva.orchestrator.domain.TaskStatus;
 import jakarta.persistence.Column;
 import jakarta.persistence.EmbeddedId;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
@@ -16,8 +19,8 @@ import java.time.Instant;
 /**
  * Per-task audit trail recording the lifecycle of each action execution.
  *
- * <p>Each row represents a single attempt of a task (identified by the composite
- * key of correlationId, flowId, taskId, and attempt number).</p>
+ * <p>Each row represents a task execution (identified by the composite
+ * key of processFlowId and taskFlowId).</p>
  */
 @Entity
 @Table(name = "task_execution")
@@ -38,14 +41,9 @@ public class TaskExecution {
     @Column(name = "batch_index")
     private short batchIndex;
 
+    @Enumerated(EnumType.STRING)
     @Column(name = "status", length = 16)
-    private String status;
-
-    @Column(name = "downstream_id", length = 256)
-    private String downstreamId;
-
-    @Column(name = "downstream_href", length = 1024)
-    private String downstreamHref;
+    private TaskStatus status;
 
     @Column(name = "started_at")
     private Instant startedAt;

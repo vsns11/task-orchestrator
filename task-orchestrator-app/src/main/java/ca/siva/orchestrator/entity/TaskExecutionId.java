@@ -16,7 +16,6 @@ import java.io.Serializable;
  *
  * @param processFlowId the TMF-701 processFlow UUID (= Kafka correlationId)
  * @param taskFlowId    the TMF-701 taskFlow UUID minted by the task-runner
- * @param attempt       the retry attempt number (1-based)
  */
 @Embeddable
 @Getter
@@ -34,7 +33,4 @@ public class TaskExecutionId implements Serializable {
 
     @Column(name = "task_flow_id", length = 64)
     private String taskFlowId;
-
-    @Column(name = "attempt")
-    private short attempt;
 }

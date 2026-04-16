@@ -10,14 +10,13 @@ import org.springframework.messaging.Message;
 import org.springframework.messaging.support.MessageBuilder;
 import org.springframework.stereotype.Component;
 
+import java.util.concurrent.CompletableFuture;
+
 /**
  * Publishes {@link TaskCommand} messages to the {@code task.command} topic.
  *
  * <p>Sets the Kafka record key to {@code correlationId} to guarantee all events
  * for a single process flow are serialized on the same partition.</p>
- *
- * <p>Custom headers (eventId, messageType, messageName, source, schemaVersion)
- * are set on each message for easy filtering in Offset Explorer and kcat.</p>
  */
 @Slf4j
 @Component
@@ -30,21 +29,29 @@ public class TaskCommandPublisher {
     /** Publishes an envelope to the task.command topic with partition-key = correlationId. */
     public void publish(TaskCommand taskCommand) {
         String key = taskCommand.getCorrelationId();
+        String messageName = taskCommand.getMessageName();
+        String eventId = taskCommand.getEventId();
 
         Message<TaskCommand> kafkaMessage = MessageBuilder
                 .withPayload(taskCommand)
                 .setHeader(KafkaHeaders.TOPIC, topics.taskCommand())
                 .setHeader(KafkaHeaders.KEY, key)
-                .setHeader("eventId",       taskCommand.getEventId())
+                .setHeader("eventId",       eventId)
                 .setHeader("messageType",   taskCommand.getMessageType())
-                .setHeader("messageName",   taskCommand.getMessageName())
+                .setHeader("messageName",   messageName)
                 .setHeader("source",        taskCommand.getSource())
                 .setHeader("schemaVersion", taskCommand.getSchemaVersion())
                 .build();
 
         log.info("PUBLISH {} eventId={} corrId={} source={}",
-                taskCommand.getMessageName(), taskCommand.getEventId(), key, taskCommand.getSource());
+                messageName, eventId, key, taskCommand.getSource());
 
-        kafka.send(kafkaMessage);
+        CompletableFuture<?> future = kafka.send(kafkaMessage);
+        future.whenComplete((result, ex) -> {
+            if (ex != null) {
+                log.error("PUBLISH FAILED {} eventId={} corrId={}: {}",
+                        messageName, eventId, key, ex.getMessage(), ex);
+            }
+        });
     }
 }

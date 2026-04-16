@@ -1,6 +1,7 @@
 package ca.siva.orchestrator.client;
 
 import ca.siva.orchestrator.config.Tmf701Properties;
+import ca.siva.orchestrator.dto.tmf.ProcessFlow;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -18,11 +19,15 @@ import java.util.Optional;
 /**
  * HTTP client for the TMF-701 processFlow API.
  *
- * <p>Provides two PATCH operations:</p>
+ * <p>Provides:</p>
  * <ul>
- *   <li>Add a taskFlow reference to the parent processFlow</li>
- *   <li>Update the processFlow lifecycle state (completed / failed)</li>
+ *   <li>PATCH — add a taskFlow reference to the parent processFlow</li>
+ *   <li>PATCH — update the processFlow lifecycle state (completed / failed)</li>
+ *   <li>GET — fetch the processFlow object when promoting to the next batch</li>
  * </ul>
+ *
+ * <p>The URI template for the processFlow resource is loaded from
+ * {@link Tmf701Properties#processFlowPath()} — do not hardcode it here.</p>
  *
  * <p>All operations are best-effort: errors are logged but not propagated,
  * since the orchestrator must not block on downstream HTTP failures.</p>
@@ -31,6 +36,10 @@ import java.util.Optional;
 @Component
 @RequiredArgsConstructor
 public class Tmf701Client {
+
+    private static final String RELATED_ENTITY_ROLE = "TaskFlow";
+    private static final String RELATED_ENTITY_TYPE = "RelatedEntity";
+    private static final String STATE_FIELD         = "state";
 
     private final Tmf701Properties props;
     private final RestClient.Builder builder;
@@ -43,7 +52,8 @@ public class Tmf701Client {
     public void init() {
         String baseUrl = resolveBaseUrl();
         this.client = builder.baseUrl(baseUrl).build();
-        log.info("TMF-701 client initialized with base URL: {}", baseUrl);
+        log.info("TMF-701 client initialized with base URL: {} processFlowPath: {}",
+                baseUrl, props.processFlowPath());
     }
 
     /** Registers a taskFlow reference on the parent processFlow via PATCH. */
@@ -53,15 +63,15 @@ public class Tmf701Client {
                 "relatedEntity", List.of(Map.of(
                         "id",            taskFlowId,
                         "href",          Objects.toString(taskFlowHref, ""),
-                        "role",          "TaskFlow",
-                        "@type",         "RelatedEntity",
-                        "@referredType", "TaskFlow",
+                        "role",          RELATED_ENTITY_ROLE,
+                        "@type",         RELATED_ENTITY_TYPE,
+                        "@referredType", RELATED_ENTITY_ROLE,
                         "name",          Objects.toString(actionName, "")
                 ))
         );
         try {
             client.patch()
-                    .uri("/processFlow/{id}", processFlowId)
+                    .uri(props.processFlowPath(), processFlowId)
                     .body(patch)
                     .retrieve()
                     .toBodilessEntity();
@@ -76,14 +86,34 @@ public class Tmf701Client {
     public void patchProcessFlowState(String processFlowId, String state) {
         try {
             client.patch()
-                    .uri("/processFlow/{id}", processFlowId)
-                    .body(Map.of("state", state))
+                    .uri(props.processFlowPath(), processFlowId)
+                    .body(Map.of(STATE_FIELD, state))
                     .retrieve()
                     .toBodilessEntity();
             log.info("PATCH processFlow {} state -> {}", processFlowId, state);
         } catch (RestClientException e) {
             log.warn("PATCH processFlow {} state {} failed: {}",
                     processFlowId, state, e.getMessage());
+        }
+    }
+
+    /**
+     * Fetches the processFlow object from TMF-701 by ID.
+     * Used when promoting to the next batch — avoids keeping the processFlow in memory.
+     *
+     * @param processFlowId the processFlow UUID
+     * @return the processFlow object, or empty if not found or call fails
+     */
+    public Optional<ProcessFlow> getProcessFlow(String processFlowId) {
+        try {
+            ProcessFlow processFlow = client.get()
+                    .uri(props.processFlowPath(), processFlowId)
+                    .retrieve()
+                    .body(ProcessFlow.class);
+            return Optional.ofNullable(processFlow);
+        } catch (RestClientException e) {
+            log.warn("GET processFlow {} failed: {}", processFlowId, e.getMessage());
+            return Optional.empty();
         }
     }
 

@@ -1,20 +1,21 @@
 package ca.siva.orchestrator.mock.pamconsumer;
 
-import ca.siva.orchestrator.domain.MessageNames;
+import ca.siva.orchestrator.domain.MessageName;
 import ca.siva.orchestrator.domain.MessageType;
 import ca.siva.orchestrator.domain.Sources;
 import ca.siva.orchestrator.dto.TaskCommand;
 import ca.siva.orchestrator.dto.TaskCommand.Action;
+import ca.siva.orchestrator.dto.tmf.ProcessFlow;
 import ca.siva.orchestrator.dto.TaskCommand.Batch;
 import ca.siva.orchestrator.dto.TaskCommand.Downstream;
 import ca.siva.orchestrator.dto.TaskCommand.Inputs;
-import ca.siva.orchestrator.dto.TaskCommand.Trigger;
 import ca.siva.orchestrator.dto.tmf.NotificationEvent;
 import ca.siva.orchestrator.kafka.TaskCommandFactory;
 import ca.siva.orchestrator.kafka.TaskCommandPublisher;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Profile;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Component;
@@ -40,11 +41,11 @@ import java.util.concurrent.ThreadLocalRandom;
 @Slf4j
 @Component
 @RequiredArgsConstructor
+@Profile("local-dev")
 public class MockPamConsumer {
 
     private final TaskCommandPublisher publisher;
     private final TaskCommandFactory taskCommandFactory;
-    private final ca.siva.orchestrator.kafka.TaskEventsPublisher taskEventsPublisher;
     private final ObjectMapper objectMapper;
 
     // ---- Job 1: notification.management → processFlow.initiated ----
@@ -96,23 +97,20 @@ public class MockPamConsumer {
             return;
         }
 
-        // Convert the full processFlow event into a Map for the TaskCommand inputs
-        @SuppressWarnings("unchecked")
-        Map<String, Object> processFlowMap = objectMapper.convertValue(event, Map.class);
+        // Convert NotificationEvent to typed ProcessFlow
+        ProcessFlow processFlow =
+                objectMapper.convertValue(event, ProcessFlow.class);
 
         // Build processFlow.initiated and publish to task.command
         TaskCommand initiated = taskCommandFactory.buildBase(
-                processFlowId, MessageNames.PROCESS_FLOW_INITIATED,
+                processFlowId, MessageName.PROCESS_FLOW_INITIATED.getValue(),
                 MessageType.EVENT, Sources.PAMCONSUMER);
         initiated.setDagKey(dagKey);
         initiated.setInputs(TaskCommand.Inputs.builder()
-                .processFlow(processFlowMap)
+                .processFlow(processFlow)
                 .build());
 
         publisher.publish(initiated);
-
-        // Publish INITIATED lifecycle event to task.events topic
-        taskEventsPublisher.publishInitiated(processFlowId, dagKey);
 
         log.info("[MOCK pamconsumer] processFlow.created → processFlow.initiated dagKey={} corrId={}",
                 dagKey, processFlowId);
@@ -140,7 +138,7 @@ public class MockPamConsumer {
         // the correlationId and task info from the waiting_task table.
         // Here we use the correlationId from the event itself.
         TaskCommand signal = taskCommandFactory.buildBase(
-                event.getCorrelationId(), MessageNames.TASK_SIGNAL,
+                event.getCorrelationId(), MessageName.TASK_SIGNAL.getValue(),
                 MessageType.SIGNAL, Sources.PAMCONSUMER);
 
         signal.setInputs(Inputs.builder()
@@ -148,9 +146,6 @@ public class MockPamConsumer {
                         .id(downstreamTransactionId)
                         .href(downstreamHref)
                         .build())
-                .build());
-
-        signal.setTrigger(Trigger.builder()
                 .externalEventId(event.getEventId())
                 .externalType(event.getType())
                 .reportingSystem(reportingSystemId)
@@ -173,7 +168,7 @@ public class MockPamConsumer {
         sleepRandom(300, 900);
 
         TaskCommand signal = taskCommandFactory.buildBase(
-                command.getCorrelationId(), MessageNames.TASK_SIGNAL,
+                command.getCorrelationId(), MessageName.TASK_SIGNAL.getValue(),
                 MessageType.SIGNAL, Sources.PAMCONSUMER);
 
         signal.setTask(TaskCommand.Task.builder().id(taskId).href(taskHref).build());
@@ -182,8 +177,6 @@ public class MockPamConsumer {
 
         signal.setInputs(Inputs.builder()
                 .downstream(Downstream.builder().id(downstreamId).href(downstreamHref).build())
-                .build());
-        signal.setTrigger(Trigger.builder()
                 .externalEventId(UUID.randomUUID().toString())
                 .externalType("TaskFinalAsyncResponseSend")
                 .reportingSystem("ACUT")
@@ -196,17 +189,18 @@ public class MockPamConsumer {
 
     // ---- helpers ----
 
-    private static Optional<Action> copyAction(TaskCommand source) {
-        return Optional.ofNullable(source.getAction())
-                .map(a -> Action.builder()
-                        .actionName(a.getActionName()).actionCode(a.getActionCode())
-                        .dcxActionCode(a.getDcxActionCode())
+    private static Optional<Action> copyAction(TaskCommand taskCommand) {
+        return Optional.ofNullable(taskCommand.getAction())
+                .map(action -> Action.builder()
+                        .actionName(action.getActionName())
+                        .actionCode(action.getActionCode())
+                        .dcxActionCode(action.getDcxActionCode())
                         .build());
     }
 
-    private static Optional<Batch> copyBatch(TaskCommand source) {
-        return Optional.ofNullable(source.getBatch())
-                .map(b -> Batch.builder().index(b.getIndex()).build());
+    private static Optional<Batch> copyBatch(TaskCommand taskCommand) {
+        return Optional.ofNullable(taskCommand.getBatch())
+                .map(batch -> Batch.builder().index(batch.getIndex()).build());
     }
 
     private static void sleepRandom(int minMs, int maxMs) {

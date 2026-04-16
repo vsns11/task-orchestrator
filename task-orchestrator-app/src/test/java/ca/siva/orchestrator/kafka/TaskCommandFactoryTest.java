@@ -3,10 +3,11 @@ package ca.siva.orchestrator.kafka;
 import ca.siva.orchestrator.actionregistry.ActionDefinition;
 import ca.siva.orchestrator.actionregistry.ActionRegistry;
 import ca.siva.orchestrator.dag.DagDefinition;
-import ca.siva.orchestrator.domain.MessageNames;
+import ca.siva.orchestrator.domain.MessageName;
 import ca.siva.orchestrator.domain.ExecutionMode;
 import ca.siva.orchestrator.domain.MessageType;
 import ca.siva.orchestrator.domain.Sources;
+import ca.siva.orchestrator.dto.tmf.ProcessFlow;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -14,7 +15,6 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -28,14 +28,13 @@ class TaskCommandFactoryTest {
 
     @Test
     void buildBase_setsAllMetadataFields() {
-        var testCommand = factory.buildBase("corr-1", MessageNames.TASK_EVENT, MessageType.EVENT, Sources.TASK_RUNNER);
+        var testCommand = factory.buildBase("corr-1", MessageName.TASK_EVENT.getValue(), MessageType.EVENT, Sources.TASK_RUNNER);
 
         assertThat(testCommand.getEventId()).isNotBlank();
         assertThat(testCommand.getCorrelationId()).isEqualTo("corr-1");
-        assertThat(testCommand.getMessageName()).isEqualTo(MessageNames.TASK_EVENT);
+        assertThat(testCommand.getMessageName()).isEqualTo(MessageName.TASK_EVENT.getValue());
         assertThat(testCommand.getMessageType()).isEqualTo(MessageType.EVENT);
         assertThat(testCommand.getSource()).isEqualTo(Sources.TASK_RUNNER);
-        ;
         assertThat(testCommand.getEventTime()).isNotNull();
     }
 
@@ -54,7 +53,7 @@ class TaskCommandFactoryTest {
         batch.setIndex(0);
         batch.setActions(List.of(ad));
 
-        var result = factory.buildTaskExecute("corr-1", "TestDAG", batch, ad, Map.of("id", "pf-1"), null);
+        var result = factory.buildTaskExecute("corr-1", "TestDAG", batch, ad, ProcessFlow.builder().id("pf-1").build(), null);
 
         assertThat(result).isPresent();
         var testCommand = result.get();
@@ -80,6 +79,6 @@ class TaskCommandFactoryTest {
         batch.setIndex(0);
         batch.setActions(List.of(ad));
 
-        assertThat(factory.buildTaskExecute("corr-1", "TestDAG", batch, ad, Map.of(), null)).isEmpty();
+        assertThat(factory.buildTaskExecute("corr-1", "TestDAG", batch, ad, null, null)).isEmpty();
     }
 }

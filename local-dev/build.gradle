@@ -9,6 +9,10 @@ plugins {
     id 'org.springframework.boot'
 }
 
+bootRun {
+    jvmArgs = ['-Dspring.profiles.active=db,kafka,orchestration,local-dev']
+}
+
 dependencies {
     // The real orchestrator
     implementation project(':task-orchestrator-app')

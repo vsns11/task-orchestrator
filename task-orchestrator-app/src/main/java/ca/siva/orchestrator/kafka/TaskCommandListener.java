@@ -27,13 +27,13 @@ public class TaskCommandListener {
             groupId = "${spring.kafka.consumer.group-id}",
             containerFactory = "kafkaListenerContainerFactory"
     )
-    public void onMessage(TaskCommand message, Acknowledgment ack) {
+    public void onMessage(TaskCommand taskCommand, Acknowledgment ack) {
         try {
-            orchestrator.handle(message);
+            orchestrator.handle(taskCommand);
         } catch (Exception e) {
             // Log and move on — never re-throw, never block the consumer
             log.error("Error handling envelope eventId={}: {}",
-                    message != null ? message.getEventId() : "null", e.getMessage(), e);
+                    taskCommand != null ? taskCommand.getEventId() : "null", e.getMessage(), e);
         } finally {
             // Always ack so the consumer continues to the next message
             ack.acknowledge();

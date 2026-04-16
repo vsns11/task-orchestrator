@@ -1,11 +1,11 @@
 package ca.siva.orchestrator.demo;
 
 import ca.siva.orchestrator.config.TopicsProperties;
-import ca.siva.orchestrator.domain.MessageNames;
+import ca.siva.orchestrator.domain.MessageName;
 import ca.siva.orchestrator.domain.MessageType;
 import ca.siva.orchestrator.domain.Sources;
 import ca.siva.orchestrator.dto.TaskCommand;
-import ca.siva.orchestrator.dto.tmf.ProcessFlowEvent;
+import ca.siva.orchestrator.dto.tmf.ProcessFlow;
 import ca.siva.orchestrator.entity.BatchBarrier;
 import ca.siva.orchestrator.entity.TaskExecution;
 import ca.siva.orchestrator.kafka.TaskCommandFactory;
@@ -14,6 +14,7 @@ import ca.siva.orchestrator.repository.BatchBarrierRepository;
 import ca.siva.orchestrator.repository.TaskExecutionRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.context.annotation.Profile;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.support.KafkaHeaders;
 import org.springframework.messaging.support.MessageBuilder;
@@ -41,6 +42,7 @@ import java.util.UUID;
 @Slf4j
 @RestController
 @RequestMapping("/demo")
+@Profile("local-dev")
 public class DemoFlowTrigger {
 
     private final KafkaTemplate<String, Object> notificationKafka;
@@ -75,7 +77,7 @@ public class DemoFlowTrigger {
 
         String processFlowId = UUID.randomUUID().toString();
 
-        ProcessFlowEvent processFlow = ProcessFlowEvent.builder()
+        ProcessFlow processFlow = ProcessFlow.builder()
                 .id(processFlowId)
                 .href("https://tmf-process-flow/tmf-api/processFlowManagement/v4/processFlow/" + processFlowId)
                 .type("processFlow")
@@ -84,7 +86,7 @@ public class DemoFlowTrigger {
                 .channel(List.of())
                 .relatedParty(List.of())
                 .relatedEntity(List.of(
-                        ProcessFlowEvent.RelatedEntity.builder()
+                        ProcessFlow.RelatedEntity.builder()
                                 .id("B54CCE7C0E0840FF86689103A")
                                 .href("https://sharp-oneside-task/onesideTaskCatalog/findServiceDiagnosticFromCacheByTransactionId/B54CCE7C0E0840FF86689103A")
                                 .name("Internet Service Diagnostic")
@@ -94,13 +96,13 @@ public class DemoFlowTrigger {
                                 .build()
                 ))
                 .characteristic(List.of(
-                        ProcessFlowEvent.Characteristic.builder()
+                        ProcessFlow.Characteristic.builder()
                                 .id("B54CCE7C0E0840FF86689103A").name("SDT Transaction ID")
                                 .value("").valueType("string").characteristicRelationship(List.of()).build(),
-                        ProcessFlowEvent.Characteristic.builder()
+                        ProcessFlow.Characteristic.builder()
                                 .id("N/A").name("internetSubscription")
                                 .value("").valueType("string").characteristicRelationship(List.of()).build(),
-                        ProcessFlowEvent.Characteristic.builder()
+                        ProcessFlow.Characteristic.builder()
                                 .id("EZ82449").name("peinNumber")
                                 .value("").valueType("string").characteristicRelationship(List.of()).build()
                 ))
@@ -146,7 +148,7 @@ public class DemoFlowTrigger {
             @RequestParam(defaultValue = "") String downstreamHref) {
 
         TaskCommand signal = taskCommandFactory.buildBase(
-                processFlowId, MessageNames.TASK_SIGNAL,
+                processFlowId, MessageName.TASK_SIGNAL.getValue(),
                 MessageType.SIGNAL, Sources.PAMCONSUMER);
 
         signal.setTask(TaskCommand.Task.builder()
@@ -155,9 +157,6 @@ public class DemoFlowTrigger {
         signal.setInputs(TaskCommand.Inputs.builder()
                 .downstream(TaskCommand.Downstream.builder()
                         .id(downstreamTransactionId).href(downstreamHref).build())
-                .build());
-
-        signal.setTrigger(TaskCommand.Trigger.builder()
                 .externalEventId(UUID.randomUUID().toString())
                 .externalType("TaskFinalAsyncResponseSend")
                 .reportingSystem("ACUT")

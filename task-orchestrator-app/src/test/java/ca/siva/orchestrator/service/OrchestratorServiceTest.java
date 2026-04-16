@@ -1,17 +1,17 @@
 package ca.siva.orchestrator.service;
 
-import ca.siva.orchestrator.domain.MessageNames;
+import ca.siva.orchestrator.domain.MessageName;
 import ca.siva.orchestrator.domain.Sources;
 import ca.siva.orchestrator.dto.TaskCommand;
+import ca.siva.orchestrator.dto.tmf.ProcessFlow;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.util.Map;
-
 import static org.mockito.Mockito.*;
+import static org.mockito.ArgumentMatchers.*;
 
 @ExtendWith(MockitoExtension.class)
 class OrchestratorServiceTest {
@@ -34,35 +34,35 @@ class OrchestratorServiceTest {
 
     @Test
     void handle_ownTaskExecute_filtered() {
-        var testCommand = buildTestCommand(MessageNames.TASK_EXECUTE, Sources.TASK_ORCHESTRATOR);
+        var testCommand = buildTestCommand(MessageName.TASK_EXECUTE.getValue(), Sources.TASK_ORCHESTRATOR);
         service.handle(testCommand);
         verifyNoInteractions(barrier, taskExecution);
     }
 
     @Test
     void handle_processFlowInitiated_delegatesToBarrier() {
-        var testCommand = buildTestCommand(MessageNames.PROCESS_FLOW_INITIATED, Sources.PAMCONSUMER);
+        var testCommand = buildTestCommand(MessageName.PROCESS_FLOW_INITIATED.getValue(), Sources.PAMCONSUMER);
         testCommand.setDagKey("TestDAG");
         testCommand.setInputs(TaskCommand.Inputs.builder()
-                .processFlow(Map.of("id", "pf-123"))
+                .processFlow(ProcessFlow.builder().id("pf-123").build())
                 .build());
 
         service.handle(testCommand);
 
-        verify(barrier).initiateFlow("pf-123", "TestDAG",
-                Map.of("id", "pf-123"));
+        verify(barrier).initiateFlow(eq("pf-123"), eq("TestDAG"),
+                any(ProcessFlow.class));
     }
 
     @Test
     void handle_processFlowInitiated_missingDagKey_logsWarning() {
-        var testCommand = buildTestCommand(MessageNames.PROCESS_FLOW_INITIATED, Sources.PAMCONSUMER);
+        var testCommand = buildTestCommand(MessageName.PROCESS_FLOW_INITIATED.getValue(), Sources.PAMCONSUMER);
         service.handle(testCommand);
         verifyNoInteractions(barrier);
     }
 
     @Test
     void handle_taskEvent_delegatesToBothServices() {
-        var testCommand = buildTestCommand(MessageNames.TASK_EVENT, Sources.TASK_RUNNER);
+        var testCommand = buildTestCommand(MessageName.TASK_EVENT.getValue(), Sources.TASK_RUNNER);
         service.handle(testCommand);
         verify(taskExecution).upsert(testCommand);
         verify(barrier).applyTaskEvent(testCommand);
@@ -70,7 +70,7 @@ class OrchestratorServiceTest {
 
     @Test
     void handle_taskSignal_logsOnly() {
-        var testCommand = buildTestCommand(MessageNames.TASK_SIGNAL, Sources.PAMCONSUMER);
+        var testCommand = buildTestCommand(MessageName.TASK_SIGNAL.getValue(), Sources.PAMCONSUMER);
         service.handle(testCommand);
         verifyNoInteractions(barrier, taskExecution);
     }

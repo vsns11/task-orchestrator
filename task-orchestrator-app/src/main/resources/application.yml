@@ -1,79 +1,50 @@
+# ===================================================================
+# Task Orchestrator - Main Configuration
+# ===================================================================
+# Profile-based config files (activated via JVM arg -Dspring.profiles.active):
+#   application-db.yml            - PostgreSQL, JPA, Flyway
+#   application-kafka.yml         - Kafka broker, topics
+#   application-orchestration.yml - DAG, TMF-701, action-registry, task-runner retry
+#
+# Example: java -Dspring.profiles.active=db,kafka,orchestration -jar app.jar
+# ===================================================================
+
 spring:
   application:
     name: task-orchestrator
-
-  datasource:
-    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5433}/orchestrator
-    username: ${POSTGRES_USER:orchestrator}
-    password: ${POSTGRES_PASSWORD:orchestrator}
-    driver-class-name: org.postgresql.Driver
-
-  jpa:
-    database-platform: org.hibernate.dialect.PostgreSQLDialect
-    hibernate:
-      ddl-auto: validate
-    open-in-view: false
-    properties:
-      hibernate.jdbc.time_zone: UTC
-
-  flyway:
-    enabled: true
-    locations: classpath:db/migration
-
-  kafka:
-    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
-    consumer:
-      group-id: task-orchestrator
-      # 'latest' in production — only process new messages, skip old ones.
-      # Tests override this to 'earliest' so they can read messages published
-      # before the consumer group was registered.
-      auto-offset-reset: latest
-      enable-auto-commit: false
-    producer:
-      acks: all
-      properties:
-        enable.idempotence: true
-    listener:
-      ack-mode: MANUAL_IMMEDIATE
-      concurrency: 3
-    admin:
-      auto-create: true
-
-orchestrator:
-  topics:
-    task-command: task.command
-    notification-management: notification.management
-  dag:
-    location: classpath:dag/
-  tmf701:
-    base-url: http://localhost:8080/mock/tmf701
-  actionregistry:
-    base-url: http://localhost:8080/mock/actionregistry
-    action-codes-path: /action-codes
-    dcx-action-codes-path: /dcx-action-codes
-    reload-cron: "0 0 2 * * *"
-
-# Task-runner retry config for downstream HTTP calls.
-# These settings are used by the task-runner (not the orchestrator).
-# The orchestrator never retries HTTP calls — it just logs and moves on.
-task-runner:
-  retry:
-    max-attempts: 3
-    backoff-ms: 1000
-    retryable-status-codes:
-      - 502
-      - 503
-      - 504
-      - 429
+  lifecycle:
+    # On SIGTERM, stop accepting new requests and wait up to 30s for in-flight work
+    # (Kafka consumers, HTTP requests, DB transactions) to complete before forcing shutdown.
+    timeout-per-shutdown-phase: 30s
 
 server:
   port: 8080
+  shutdown: graceful
 
 management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      # Expose component details so monitoring can distinguish db-down vs kafka-down
+      show-details: always
+      show-components: always
+      probes:
+        enabled: true
+      group:
+        # Kubernetes liveness: is the JVM alive? Only fails on deadlock/OOM.
+        liveness:
+          include: livenessState
+        # Kubernetes readiness: can we accept traffic? Includes db + kafka + custom indicators.
+        readiness:
+          include: readinessState, db, kafka, actionRegistry, dagRegistry
+  health:
+    livenessState:
+      enabled: true
+    readinessState:
+      enabled: true
 
 logging:
   level:

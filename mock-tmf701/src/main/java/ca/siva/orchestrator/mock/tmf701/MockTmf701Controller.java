@@ -1,6 +1,7 @@
 package ca.siva.orchestrator.mock.tmf701;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Profile;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -25,6 +26,7 @@ import java.util.concurrent.ConcurrentHashMap;
 @Slf4j
 @RestController
 @RequestMapping("/mock/tmf701")
+@Profile("local-dev")
 public class MockTmf701Controller {
 
     /** In-memory store keyed by processFlow ID. */

@@ -1,0 +1,11 @@
+{
+  "eventId": "a1b2c3d4-bbbb-4aaa-bbbb-00000000000b",
+  "correlationId": "bbf5e84d-9c3a-4e7b-a1f2-3d6e8f0a1b2c",
+  "schemaVersion": "1.0",
+  "eventTime": "2026-04-15T14:00:00.100Z",
+  "messageType": "EVENT",
+  "messageName": "flow.lifecycle",
+  "source": "pamconsumer",
+  "dagKey": "Auto_Remediation",
+  "status": "INITIAL"
+}

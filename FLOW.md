@@ -89,7 +89,7 @@ for the latest COMPLETED result of each listed action and passes it in
 **Topic:** `notification.management`
 **Published by:** DemoFlowTrigger (simulating TMF-701)
 **Consumed by:** MockPamConsumer
-**Payload type:** `ProcessFlowEvent` (real TMF-701 structure)
+**Payload type:** `ProcessFlow` (real TMF-701 structure)
 
 This is the entry point. In production, TMF-701 publishes this when
 a processFlow is created via HTTP POST from TTD.

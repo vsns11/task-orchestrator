@@ -1,0 +1,48 @@
+{
+  "eventId": "a1b2c3d4-1111-4aaa-bbbb-000000000001",
+  "correlationId": "bbf5e84d-9c3a-4e7b-a1f2-3d6e8f0a1b2c",
+  "schemaVersion": "1.0",
+  "eventTime": "2026-04-15T14:00:00.100Z",
+  "messageType": "EVENT",
+  "messageName": "processFlow.initiated",
+  "source": "pamconsumer",
+  "dagKey": "Auto_Remediation",
+  "inputs": {
+    "processFlow": {
+      "@type": "processFlow",
+      "@baseType": "processFlow",
+      "id": "bbf5e84d-9c3a-4e7b-a1f2-3d6e8f0a1b2c",
+      "href": "https://tmf-process-flow.example.com/tmf-api/processFlowManagement/v4/processFlow/bbf5e84d-9c3a-4e7b-a1f2-3d6e8f0a1b2c",
+      "state": "active",
+      "processFlowSpecification": "Auto_Remediation",
+      "channel": [],
+      "relatedParty": [],
+      "relatedEntity": [
+        {
+          "id": "B54CCE7C0E0840FF86689103A",
+          "href": "https://diagnostics.example.com/api/v1/serviceDiagnostic/B54CCE7C0E0840FF86689103A",
+          "name": "Internet Service Diagnostic",
+          "role": "RelatedEntity",
+          "@type": "RelatedEntity",
+          "@referredType": "InternetServiceDiagnostic"
+        }
+      ],
+      "characteristic": [
+        {
+          "id": "B54CCE7C0E0840FF86689103A",
+          "name": "SDT Transaction ID",
+          "value": "B54CCE7C0E0840FF86689103A",
+          "valueType": "string",
+          "characteristicRelationship": []
+        },
+        {
+          "id": "PEIN-EZ82449",
+          "name": "peinNumber",
+          "value": "PEIN-EZ82449",
+          "valueType": "string",
+          "characteristicRelationship": []
+        }
+      ]
+    }
+  }
+}

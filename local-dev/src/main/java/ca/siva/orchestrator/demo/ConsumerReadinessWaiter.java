@@ -7,6 +7,7 @@ import org.springframework.context.event.EventListener;
 import org.springframework.kafka.config.KafkaListenerEndpointRegistry;
 import org.springframework.kafka.listener.MessageListenerContainer;
 import org.apache.kafka.common.TopicPartition;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 import java.util.Collection;
@@ -23,6 +24,7 @@ import java.util.Collection;
 @Slf4j
 @Component
 @RequiredArgsConstructor
+@Profile("local-dev")
 public class ConsumerReadinessWaiter {
 
     private final KafkaListenerEndpointRegistry registry;

@@ -53,4 +53,12 @@ public class DagRegistry {
         return Optional.ofNullable(byKey.get(dagKey));
     }
 
+    /** Returns true if at least one DAG was loaded successfully. */
+    public boolean isReady() {
+        return !byKey.isEmpty();
+    }
+
+    public int dagCount() {
+        return byKey.size();
+    }
 }

@@ -46,8 +46,8 @@ public class NotificationEvent {
     private String state;
     private List<Object> channel;
     private List<Object> relatedParty;
-    private List<ProcessFlowEvent.RelatedEntity> relatedEntity;
-    private List<ProcessFlowEvent.Characteristic> characteristic;
+    private List<ProcessFlow.RelatedEntity> relatedEntity;
+    private List<ProcessFlow.Characteristic> characteristic;
     private String processFlowSpecification;
 
     // ---- async response fields (when @type = "TaskFinalAsyncResponseSend") ----
@@ -70,11 +70,11 @@ public class NotificationEvent {
 
     /** Returns true if this is a processFlow.created event from TMF-701. */
     public boolean isProcessFlowCreated() {
-        return "processFlow".equals(type);
+        return "processFlow".equalsIgnoreCase(type);
     }
 
     /** Returns true if this is an async completion event from a downstream system. */
     public boolean isAsyncResponse() {
-        return "TaskFinalAsyncResponseSend".equals(type);
+        return "TaskFinalAsyncResponseSend".equalsIgnoreCase(type);
     }
 }

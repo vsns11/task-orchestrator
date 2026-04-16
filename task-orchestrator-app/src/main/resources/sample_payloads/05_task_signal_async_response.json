@@ -1,0 +1,30 @@
+{
+  "eventId": "a1b2c3d4-6666-4aaa-bbbb-000000000006",
+  "correlationId": "bbf5e84d-9c3a-4e7b-a1f2-3d6e8f0a1b2c",
+  "schemaVersion": "1.0",
+  "eventTime": "2026-04-15T14:00:01.800Z",
+  "messageType": "SIGNAL",
+  "messageName": "task.signal",
+  "source": "pamconsumer",
+  "task": {
+    "id": "tf-31c94387",
+    "href": "https://tmf-process-flow.example.com/tmf-api/processFlowManagement/v4/processFlow/bbf5e84d-9c3a-4e7b-a1f2-3d6e8f0a1b2c/taskFlow/tf-31c94387"
+  },
+  "action": {
+    "actionName": "runVoiceDiagnostic",
+    "actionCode": "VOICE_SERVICE_DIAGNOSTIC",
+    "dcxActionCode": "DCX-VOC-01"
+  },
+  "batch": {
+    "index": 0
+  },
+  "inputs": {
+    "downstream": {
+      "id": "ASYNC-1e4ec1e0-68a",
+      "href": "https://voice-diagnostic.example.com/api/v1/queries/ASYNC-1e4ec1e0-68a"
+    },
+    "externalEventId": "f7e6d5c4-aaaa-4bbb-cccc-111111111111",
+    "externalType": "TaskFinalAsyncResponseSend",
+    "reportingSystem": "ACUT"
+  }
+}

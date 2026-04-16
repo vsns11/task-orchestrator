@@ -2,6 +2,9 @@
 # Datasource and Kafka bootstrap-servers are injected by TestcontainersConfig
 
 spring:
+  profiles:
+    active: db, kafka, orchestration, local-dev
+
   jpa:
     database-platform: org.hibernate.dialect.PostgreSQLDialect
     hibernate:
@@ -25,6 +28,7 @@ orchestrator:
     location: classpath:dag/
   tmf701:
     base-url: http://localhost:8080/mock/tmf701
+    process-flow-path: /processFlow/{id}
   actionregistry:
     base-url: http://localhost:8080/mock/actionregistry
     action-codes-path: /action-codes

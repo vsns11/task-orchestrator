@@ -1,6 +1,6 @@
 package ca.siva.orchestrator.kafka;
 
-import ca.siva.orchestrator.domain.MessageNames;
+import ca.siva.orchestrator.domain.MessageName;
 import ca.siva.orchestrator.domain.MessageType;
 import ca.siva.orchestrator.domain.Sources;
 import ca.siva.orchestrator.domain.TaskStatus;
@@ -12,15 +12,13 @@ import org.springframework.stereotype.Component;
 /**
  * Publishes flow lifecycle events to the {@code task.command} topic.
  *
- * <p>These are high-level events that mark flow start and end:</p>
+ * <p>All events go to the single {@code task.command} topic.
+ * Consumers filter by {@code messageName} + {@code status} to track lifecycle:</p>
  * <ul>
- *   <li>{@code processFlow.initiated} with status INITIATED — flow started</li>
- *   <li>{@code task.event} with status COMPLETED — all batches closed, flow done</li>
- *   <li>{@code task.event} with status FAILED — terminal failure</li>
+ *   <li>{@code flow.lifecycle} with status INITIAL — flow started</li>
+ *   <li>{@code flow.lifecycle} with status COMPLETED — all batches closed, flow done</li>
+ *   <li>{@code flow.lifecycle} with status FAILED — terminal failure</li>
  * </ul>
- *
- * <p>Published to the same {@code task.command} topic as all other messages.
- * Consumers can filter by {@code messageName} + {@code status} to track lifecycle.</p>
  */
 @Slf4j
 @Component
@@ -36,7 +34,7 @@ public class TaskEventsPublisher {
      */
     public void publishInitiated(String processFlowId, String dagKey) {
         TaskCommand lifecycle = taskCommandFactory.buildBase(
-                processFlowId, MessageNames.FLOW_LIFECYCLE,
+                processFlowId, MessageName.FLOW_LIFECYCLE.getValue(),
                 MessageType.EVENT, Sources.PAMCONSUMER);
         lifecycle.setDagKey(dagKey);
         lifecycle.setStatus(TaskStatus.INITIAL);
@@ -50,7 +48,7 @@ public class TaskEventsPublisher {
      */
     public void publishCompleted(String processFlowId) {
         TaskCommand lifecycle = taskCommandFactory.buildBase(
-                processFlowId, MessageNames.FLOW_LIFECYCLE,
+                processFlowId, MessageName.FLOW_LIFECYCLE.getValue(),
                 MessageType.EVENT, Sources.TASK_ORCHESTRATOR);
         lifecycle.setStatus(TaskStatus.COMPLETED);
         publisher.publish(lifecycle);
@@ -63,7 +61,7 @@ public class TaskEventsPublisher {
      */
     public void publishFailed(String processFlowId, String reason) {
         TaskCommand lifecycle = taskCommandFactory.buildBase(
-                processFlowId, MessageNames.FLOW_LIFECYCLE,
+                processFlowId, MessageName.FLOW_LIFECYCLE.getValue(),
                 MessageType.EVENT, Sources.TASK_ORCHESTRATOR);
         lifecycle.setStatus(TaskStatus.FAILED);
         lifecycle.setError(TaskCommand.ErrorInfo.builder()

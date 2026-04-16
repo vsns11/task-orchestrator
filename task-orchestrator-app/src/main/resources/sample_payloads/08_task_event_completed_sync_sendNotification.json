@@ -1,0 +1,43 @@
+{
+  "eventId": "a1b2c3d4-9999-4aaa-bbbb-000000000009",
+  "correlationId": "bbf5e84d-9c3a-4e7b-a1f2-3d6e8f0a1b2c",
+  "schemaVersion": "1.0",
+  "eventTime": "2026-04-15T14:00:03.300Z",
+  "messageType": "EVENT",
+  "messageName": "task.event",
+  "source": "task-runner",
+  "status": "COMPLETED",
+  "action": {
+    "actionName": "sendNotification",
+    "actionCode": "SEND_NOTIFICATION",
+    "dcxActionCode": "DCX-NTF-01"
+  },
+  "batch": {
+    "index": 1
+  },
+  "execution": {
+    "mode": "SYNC",
+    "startedAt": "2026-04-15T14:00:02.300Z",
+    "finishedAt": "2026-04-15T14:00:03.300Z",
+    "durationMs": 1000
+  },
+  "result": {
+    "name": "sendNotification",
+    "code": "SEND_NOTIFICATION",
+    "id": "tf-e5a81b29",
+    "type": "TaskFlow",
+    "taskFlowResult": {
+      "id": "tf-e5a81b29",
+      "href": "https://tmf-process-flow.example.com/tmf-api/processFlowManagement/v4/processFlow/bbf5e84d-9c3a-4e7b-a1f2-3d6e8f0a1b2c/taskFlow/tf-e5a81b29"
+    },
+    "taskFlowResponse": {
+      "outcome": "PASS",
+      "diagnosticSummary": "Customer notification dispatched successfully",
+      "latencyMs": 245,
+      "checksRun": 3,
+      "checksPassed": 3,
+      "checksFailed": 0
+    },
+    "taskStatusCode": "COMPLETED"
+  }
+}

@@ -19,19 +19,16 @@ CREATE TABLE batch_barrier (
 
 CREATE INDEX idx_batch_barrier_status ON batch_barrier (process_flow_id, status);
 
--- Task execution: per-action audit trail recording each attempt's lifecycle.
+-- Task execution: per-action audit trail recording each task's lifecycle.
 -- process_flow_id = the processFlow UUID from TMF-701 (= correlationId).
 -- task_flow_id    = the taskFlow UUID minted by task-runner via POST to TMF-701.
 CREATE TABLE task_execution (
     process_flow_id  VARCHAR(64)  NOT NULL,
     task_flow_id     VARCHAR(64)  NOT NULL,
-    attempt          SMALLINT     NOT NULL DEFAULT 1,
     action_name      VARCHAR(64)  NOT NULL,
     action_code      VARCHAR(64)  NOT NULL,
     batch_index      SMALLINT     NOT NULL,
     status           VARCHAR(16)  NOT NULL,
-    downstream_id    VARCHAR(256),
-    downstream_href  VARCHAR(1024),
     started_at       TIMESTAMP,
     finished_at      TIMESTAMP,
     duration_ms      BIGINT,
@@ -40,7 +37,7 @@ CREATE TABLE task_execution (
     created_at       TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at       TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     version          BIGINT       NOT NULL DEFAULT 0,
-    PRIMARY KEY (process_flow_id, task_flow_id, attempt)
+    PRIMARY KEY (process_flow_id, task_flow_id)
 );
 
 CREATE INDEX idx_task_execution_action ON task_execution (process_flow_id, action_name);

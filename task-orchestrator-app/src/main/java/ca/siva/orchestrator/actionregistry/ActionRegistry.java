@@ -49,6 +49,22 @@ public class ActionRegistry {
     /** actionCode (= parent) → DcxActionCodeEntry (from GET /dcx-action-codes) */
     private final Map<String, DcxActionCodeEntry> dcxCodesByActionCode = new ConcurrentHashMap<>();
 
+    /** Becomes true only after a successful reload. Used by the health indicator. */
+    private volatile boolean ready = false;
+
+    /** Returns true if at least one successful reload has populated both maps. */
+    public boolean isReady() {
+        return ready && !actionCodesByName.isEmpty() && !dcxCodesByActionCode.isEmpty();
+    }
+
+    public int actionCount() {
+        return actionCodesByName.size();
+    }
+
+    public int dcxActionCount() {
+        return dcxCodesByActionCode.size();
+    }
+
     @EventListener(ApplicationReadyEvent.class)
     public void loadOnStartup() {
         reload();
@@ -70,11 +86,12 @@ public class ActionRegistry {
         try {
             loadActionCodes(client);
             loadDcxActionCodes(client);
+            ready = true;
 
             log.info("Action registry loaded: {} action codes, {} dcx codes from {}",
                     actionCodesByName.size(), dcxCodesByActionCode.size(), baseUrl);
         } catch (Exception e) {
-            log.error("Failed to load action registry from {}: {}", baseUrl, e.getMessage());
+            log.error("Failed to load action registry from {}: {}", baseUrl, e.getMessage(), e);
         }
     }
 
