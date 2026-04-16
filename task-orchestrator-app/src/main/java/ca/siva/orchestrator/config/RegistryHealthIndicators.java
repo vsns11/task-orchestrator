@@ -27,7 +27,7 @@ import org.springframework.context.annotation.Configuration;
 @RequiredArgsConstructor
 public class RegistryHealthIndicators {
 
-    @Bean("actionRegistry")
+    @Bean("actionRegistryHealthIndicator")
     public HealthIndicator actionRegistryHealth(ActionRegistry registry) {
         return () -> {
             if (registry.isReady()) {
@@ -44,7 +44,7 @@ public class RegistryHealthIndicators {
         };
     }
 
-    @Bean("dagRegistry")
+    @Bean("dagRegistryHealthIndicator")
     public HealthIndicator dagRegistryHealth(DagRegistry registry) {
         return () -> {
             if (registry.isReady()) {

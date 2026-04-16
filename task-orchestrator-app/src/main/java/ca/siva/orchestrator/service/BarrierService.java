@@ -105,6 +105,7 @@ public class BarrierService {
         }
 
         seedAndPublishBatch(processFlowId, dag, firstBatch.get(), processFlow);
+        runAfterCommit(() -> taskCommandsPublisher.publishInitiated(processFlowId, dagKey));
     }
 
     /**

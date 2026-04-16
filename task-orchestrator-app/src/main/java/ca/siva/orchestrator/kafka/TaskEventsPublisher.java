@@ -30,12 +30,14 @@ public class TaskEventsPublisher {
 
     /**
      * Publishes an INITIATED lifecycle event when a flow starts.
-     * Source is pamconsumer (since pamconsumer initiates the flow).
+     * Source is task-orchestrator — the orchestrator emits this once the first
+     * batch barrier is seeded, so all flow.lifecycle events have a single
+     * authoritative producer.
      */
     public void publishInitiated(String processFlowId, String dagKey) {
         TaskCommand lifecycle = taskCommandFactory.buildBase(
                 processFlowId, MessageName.FLOW_LIFECYCLE.getValue(),
-                MessageType.EVENT, Sources.PAMCONSUMER);
+                MessageType.EVENT, Sources.TASK_ORCHESTRATOR);
         lifecycle.setDagKey(dagKey);
         lifecycle.setStatus(TaskStatus.INITIAL);
         publisher.publish(lifecycle);
