@@ -29,23 +29,49 @@ public class DagRegistry {
     private final Map<String, DagDefinition> byKey = new HashMap<>();
     private final ObjectMapper yaml = new ObjectMapper(new YAMLFactory());
 
-    /** Loads all DAG YAML files from the configured classpath location. */
+    /**
+     * Loads all DAG YAML files from the configured classpath location.
+     *
+     * <p>Failure policy: a bad file (parse error, missing dagKey, or IO failure)
+     * is logged with its filename and skipped so healthy DAGs still load. The
+     * class-level {@link #isReady()} gate allows callers / health checks to
+     * detect a "zero DAGs loaded" outcome when every file failed.</p>
+     */
     @PostConstruct
     public void load() {
+        Resource[] files;
         try {
             PathMatchingResourcePatternResolver resolver = new PathMatchingResourcePatternResolver();
-            Resource[] files = resolver.getResources(props.location() + "*.yml");
-            for (Resource r : files) {
-                try (InputStream in = r.getInputStream()) {
-                    DagDefinition def = yaml.readValue(in, DagDefinition.class);
-                    byKey.put(def.getDagKey(), def);
-                    log.info("Loaded DAG '{}' with {} batches",
-                            def.getDagKey(),
-                            Optional.ofNullable(def.getBatches()).map(java.util.List::size).orElse(0));
-                }
-            }
+            files = resolver.getResources(props.location() + "*.yml");
         } catch (IOException e) {
-            log.error("Failed to load DAG definitions from {}: {}", props.location(), e.getMessage());
+            log.error("Could not enumerate DAG YAML files at {}: {}", props.location(), e.getMessage(), e);
+            return;
+        }
+
+        for (Resource r : files) {
+            String filename = Optional.ofNullable(r.getFilename()).orElse("<unknown>");
+            try (InputStream in = r.getInputStream()) {
+                DagDefinition def = yaml.readValue(in, DagDefinition.class);
+                if (def == null || def.getDagKey() == null || def.getDagKey().isBlank()) {
+                    log.error("Skipping DAG file {} — missing or blank dagKey", filename);
+                    continue;
+                }
+                byKey.put(def.getDagKey(), def);
+                log.info("Loaded DAG '{}' from {} with {} batches",
+                        def.getDagKey(), filename,
+                        Optional.ofNullable(def.getBatches()).map(java.util.List::size).orElse(0));
+            } catch (IOException | RuntimeException e) {
+                // RuntimeException covers Jackson parse errors (JsonMappingException,
+                // JsonParseException) which extend IOException but we catch broadly
+                // so a single malformed file never aborts the whole load.
+                log.error("Failed to parse DAG file {}: {}", filename, e.getMessage(), e);
+            }
+        }
+
+        if (byKey.isEmpty()) {
+            log.error("No DAG definitions loaded from {} — orchestrator will reject every"
+                    + " processFlow.initiated event until at least one DAG is available",
+                    props.location());
         }
     }
 

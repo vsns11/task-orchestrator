@@ -1,0 +1,16 @@
+# ===================================================================
+# Integration-test overrides — loaded LAST in the profile chain so it
+# takes precedence over application-orchestration.yml.
+# ===================================================================
+
+spring:
+  config:
+    activate:
+      on-profile: integrationtest
+
+orchestrator:
+  actionregistry:
+    # The mock action-registry controller only publishes a tiny fixture
+    # set; disabling the fail-fast allowlist keeps the test JVM alive.
+    # Production still runs the full list from application-orchestration.yml.
+    required-action-names: []

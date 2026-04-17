@@ -31,6 +31,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 /**
@@ -265,21 +266,37 @@ public class BarrierService {
     private void seedAndPublishBatch(String processFlowId, DagDefinition dag,
                                       DagDefinition.BatchDef batch,
                                       ProcessFlow processFlow) {
+        // Guard against a batch with null/empty actions — a DAG YAML that got
+        // through the loader but carries an empty batch would NPE on
+        // getActions().size() or publish zero task.execute commands (infinite
+        // wait). Fail the flow cleanly instead.
+        List<DagDefinition.ActionDef> actions = batch.getActions();
+        if (actions == null || actions.isEmpty()) {
+            log.error("DAG {} batch {} has no actions — marking flow {} failed",
+                    dag.getDagKey(), batch.getIndex(), processFlowId);
+            runAfterCommit(() -> {
+                tmf701.patchProcessFlowState(processFlowId, STATE_FAILED);
+                taskCommandsPublisher.publishFailed(processFlowId,
+                        "DAG " + dag.getDagKey() + " batch " + batch.getIndex() + " has no actions");
+            });
+            return;
+        }
+
         BatchBarrier barrier = new BatchBarrier();
         barrier.setId(new BatchBarrierId(processFlowId, (short) batch.getIndex()));
         barrier.setDagKey(dag.getDagKey());
-        barrier.setTaskTotal(batch.getActions().size());
+        barrier.setTaskTotal(actions.size());
         barrier.open();
         repo.save(barrier);
 
         log.info("Seeded barrier batch {} for flow {} (total={})",
-                batch.getIndex(), processFlowId, batch.getActions().size());
+                batch.getIndex(), processFlowId, actions.size());
 
         // Build commands and resolve dependencies inside the transaction (needs DB reads),
         // but defer the Kafka publishes until AFTER the transaction commits. This guarantees
         // that task.execute messages are never published for a flow that rolled back.
         Map<String, String> depResults = batchResolveDependencies(processFlowId, batch);
-        List<TaskCommand> commandsToPublish = batch.getActions().stream()
+        List<TaskCommand> commandsToPublish = actions.stream()
                 .flatMap(action -> {
                     Map<String, Object> depsForAction = dependencyResultsFor(action, depResults);
                     return taskCommandFactory.buildTaskExecute(
@@ -307,18 +324,33 @@ public class BarrierService {
      * is active, runs it immediately (e.g. in tests). This keeps blocking operations
      * (HTTP calls, Kafka publishes) out of the DB transaction so we don't hold the
      * connection for the duration of a remote call.
+     *
+     * <p>Exceptions from the post-commit hook are caught and logged at ERROR
+     * level: the transaction has already committed, so rethrowing would only
+     * produce a Spring-internal stack trace buried under
+     * {@code TransactionSynchronizationUtils.invokeAfterCommit} without any
+     * business context. Catching here lets us log the processFlow/action
+     * coordinates the caller would otherwise lose. The downstream system
+     * eventually re-synchronizes via the next event or a manual retry.</p>
      */
     private void runAfterCommit(Runnable action) {
+        Runnable guarded = () -> {
+            try {
+                action.run();
+            } catch (RuntimeException e) {
+                log.error("Post-commit hook failed (TMF-701 / Kafka publish): {}", e.getMessage(), e);
+            }
+        };
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(
                     new TransactionSynchronization() {
                         @Override
                         public void afterCommit() {
-                            action.run();
+                            guarded.run();
                         }
                     });
         } else {
-            action.run();
+            guarded.run();
         }
     }
 
@@ -332,7 +364,12 @@ public class BarrierService {
      */
     private Map<String, String> batchResolveDependencies(String processFlowId,
                                                           DagDefinition.BatchDef batch) {
-        List<String> allDeps = batch.getActions().stream()
+        List<DagDefinition.ActionDef> actions = batch.getActions();
+        if (actions == null || actions.isEmpty()) {
+            return Map.of();
+        }
+        List<String> allDeps = actions.stream()
+                .filter(Objects::nonNull)
                 .map(DagDefinition.ActionDef::getDependsOn)
                 .filter(deps -> deps != null && !deps.isEmpty())
                 .flatMap(List::stream)
@@ -373,15 +410,42 @@ public class BarrierService {
         return results;
     }
 
+    /**
+     * PATCHes the parent processFlow's {@code relatedEntity} array with the
+     * completed task's id + href pair — mirrors the upstream
+     * {@code ActionBuilder.enrichProcessFlowWithRelatedEntity} contract,
+     * which fails closed when either identifier is missing rather than
+     * writing a half-populated entity the downstream can't resolve.
+     *
+     * <p>Skip conditions (any one of these aborts the PATCH):
+     * <ul>
+     *   <li>{@code result} or {@code action} missing — nothing to patch with</li>
+     *   <li>{@code result.id} null/blank — the {@code relatedEntity.id} slot</li>
+     *   <li>{@code taskFlowResponse.href} null/blank — the {@code relatedEntity.href} slot</li>
+     * </ul>
+     * Both slots are required by the TMF-701 RelatedEntity schema; sending
+     * one without the other produces a reference the consumer cannot follow.</p>
+     */
     private void patchParentProcessFlow(TaskCommand taskCommand, String processFlowId) {
         ActionResponse result = taskCommand.getResult();
-        if (result == null || result.getId() == null || taskCommand.getAction() == null) {
+        if (result == null || taskCommand.getAction() == null) {
+            return;
+        }
+        String taskId = result.getId();
+        if (taskId == null || taskId.isBlank()) {
+            log.warn("Skipping processFlow {} patch — missing relatedEntity.id (actionName={})",
+                    processFlowId, taskCommand.getAction().getActionName());
             return;
         }
         String taskFlowHref = extractTaskFlowHref(result);
+        if (taskFlowHref == null || taskFlowHref.isBlank()) {
+            log.warn("Skipping processFlow {} patch — missing relatedEntity.href for task id={} actionName={}",
+                    processFlowId, taskId, taskCommand.getAction().getActionName());
+            return;
+        }
         tmf701.patchProcessFlowAddTaskFlowRef(
                 processFlowId,
-                result.getId(),
+                taskId,
                 taskFlowHref,
                 taskCommand.getAction().getActionName());
     }
@@ -427,10 +491,18 @@ public class BarrierService {
      * in {@link ActionResponse#getTaskFlowResponse()}. The raw
      * {@code taskResult} field is intentionally ignored here — it's the
      * downstream's business payload, not TMF resource metadata.
+     *
+     * @return the href when populated, or {@code null} when the caller should
+     *         skip the relatedEntity PATCH entirely (never an empty string —
+     *         that would produce an invalid TMF relatedEntity reference)
      */
     private static String extractTaskFlowHref(ActionResponse result) {
         TaskFlow tf = result.getTaskFlowResponse();
-        return tf != null && tf.getHref() != null ? tf.getHref() : "";
+        if (tf == null) {
+            return null;
+        }
+        String href = tf.getHref();
+        return (href != null && !href.isBlank()) ? href : null;
     }
 
     // ---- null-safe field extractors for logging ----

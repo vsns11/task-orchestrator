@@ -11,7 +11,6 @@ import org.springframework.core.env.Environment;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
-import org.springframework.web.client.RestClientException;
 
 import java.util.List;
 import java.util.Map;
@@ -73,13 +72,27 @@ public class Tmf701Client {
                 authHeader != null ? "enabled (user=" + fidCreds.username() + ")" : "disabled");
     }
 
-    /** Registers a taskFlow reference on the parent processFlow via PATCH. */
+    /**
+     * Registers a taskFlow reference on the parent processFlow via PATCH.
+     *
+     * <p>The TMF-701 {@code relatedEntity} element requires both {@code id}
+     * and {@code href} — the pair together resolves the referenced resource.
+     * This method fails closed (warns and returns) when either is missing,
+     * mirroring the upstream {@code ActionBuilder.enrichProcessFlowWithRelatedEntity}
+     * validation rather than PATCHing a half-populated entity.</p>
+     */
     public void patchProcessFlowAddTaskFlowRef(String processFlowId, String taskFlowId,
                                                 String taskFlowHref, String actionName) {
+        if (taskFlowId == null || taskFlowId.isBlank()
+                || taskFlowHref == null || taskFlowHref.isBlank()) {
+            log.warn("PATCH processFlow {} skipped — relatedEntity requires both id and href (id={}, href={}, actionName={})",
+                    processFlowId, taskFlowId, taskFlowHref, actionName);
+            return;
+        }
         Map<String, Object> patch = Map.of(
                 "relatedEntity", List.of(Map.of(
                         "id",            taskFlowId,
-                        "href",          Objects.toString(taskFlowHref, ""),
+                        "href",          taskFlowHref,
                         "role",          RELATED_ENTITY_ROLE,
                         "@type",         RELATED_ENTITY_TYPE,
                         "@referredType", RELATED_ENTITY_ROLE,
@@ -92,10 +105,14 @@ public class Tmf701Client {
                     .body(patch)
                     .retrieve()
                     .toBodilessEntity();
-            log.debug("PATCH processFlow {} added taskFlow ref {}", processFlowId, taskFlowId);
-        } catch (RestClientException e) {
-            log.warn("PATCH processFlow {} (add ref {}) failed: {}",
-                    processFlowId, taskFlowId, e.getMessage());
+            log.debug("PATCH processFlow {} added taskFlow relatedEntity (id={}, href={})",
+                    processFlowId, taskFlowId, taskFlowHref);
+        } catch (RuntimeException e) {
+            // Catches RestClientException (HTTP) AND HttpMessageConversionException
+            // (Jackson request-body serialization); best-effort: log & swallow so
+            // orchestration never blocks on a TMF-701 hiccup.
+            log.warn("PATCH processFlow {} (add relatedEntity id={} href={}) failed: {}",
+                    processFlowId, taskFlowId, taskFlowHref, e.getMessage());
         }
     }
 
@@ -108,7 +125,7 @@ public class Tmf701Client {
                     .retrieve()
                     .toBodilessEntity();
             log.info("PATCH processFlow {} state -> {}", processFlowId, state);
-        } catch (RestClientException e) {
+        } catch (RuntimeException e) {
             log.warn("PATCH processFlow {} state {} failed: {}",
                     processFlowId, state, e.getMessage());
         }
@@ -128,7 +145,11 @@ public class Tmf701Client {
                     .retrieve()
                     .body(ProcessFlow.class);
             return Optional.ofNullable(processFlow);
-        } catch (RestClientException e) {
+        } catch (RuntimeException e) {
+            // Catches RestClientException (transport/HTTP 4xx/5xx) AND
+            // HttpMessageConversionException (Jackson deserialization errors
+            // when the upstream returns an unparseable body). Either way the
+            // contract stays "empty Optional, never throws".
             log.warn("GET processFlow {} failed: {}", processFlowId, e.getMessage());
             return Optional.empty();
         }

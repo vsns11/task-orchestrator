@@ -8,16 +8,34 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 /**
- * Response entry from the DCX action-code API ({@code GET /dcx-action-codes}).
+ * Response entry from the DCX action-code API
+ * ({@code GET /dcxActionCodes/findAllDcxActionCodesFromDb}).
  *
- * <p>The {@code parent} field is the actionCode — this is the join key to
- * link a dcxActionCode back to an actionCode. The lookup chain is:</p>
+ * <p>Real API shape (April 2025):</p>
+ * <pre>
+ * {
+ *   "parent":        "3018",
+ *   "dcxActionCode": "3018",
+ *   "modemType":     "DEFAULT",
+ *   "flowType":      "DEFAULT"
+ * }
+ * </pre>
+ *
+ * <p>The {@code parent} field is the actionCode this dcxActionCode belongs
+ * to — join key for the lookup chain:</p>
  * <ol>
- *   <li>actionName → ActionCodeEntry → get actionCode</li>
- *   <li>actionCode (= parent) → DcxActionCodeEntry → get dcxActionCode</li>
+ *   <li>actionName → {@link ActionCodeEntry} → get actionCode</li>
+ *   <li>actionCode (= {@link #parent}) → {@link DcxActionCodeEntry} → get dcxActionCode</li>
  * </ol>
  *
- * <p>Mirrors the real PAM DcxActionCodeResponse structure.</p>
+ * <p>{@code modemType} and {@code flowType} default to {@code "DEFAULT"} for
+ * the common case. When the real DCX registry contains multiple rows for
+ * the same {@code parent} differentiated by these two dimensions, the
+ * registry's simple 1-D map still works — it returns the first-seen row
+ * and logs a duplicate warning for the others. Extend the key with
+ * {@code parent + "," + flowType + "," + modemType} (per upstream
+ * {@code ActionBuilder.buildKeyForDcxActionCode}) if that becomes a
+ * real constraint.</p>
  */
 @Getter
 @Setter
@@ -30,12 +48,14 @@ public class DcxActionCodeEntry {
     @JsonProperty("parent")
     private String parent;
 
-    @JsonProperty("flowType")
-    private String flowType;
-
     @JsonProperty("dcxActionCode")
     private String dcxActionCode;
 
-    @JsonProperty("nodeType")
-    private String nodeType;
+    /** Modem-type discriminator — commonly {@code "DEFAULT"}. */
+    @JsonProperty("modemType")
+    private String modemType;
+
+    /** Flow-type discriminator — commonly {@code "DEFAULT"}. */
+    @JsonProperty("flowType")
+    private String flowType;
 }

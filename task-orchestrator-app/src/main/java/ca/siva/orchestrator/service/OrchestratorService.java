@@ -91,7 +91,23 @@ public class OrchestratorService {
     }
 
     private void handleTaskEvent(TaskCommand taskCommand) {
-        taskExecution.upsert(taskCommand);
+        // Step 1 — upsert the audit row. An exception here (e.g. transient DB
+        // error that outlasted Retryable, or a serialization issue) must not
+        // prevent the barrier update: the barrier is authoritative for flow
+        // progression; losing an audit row is a diagnostic problem, not a
+        // correctness one. Log with eventId so the row can be reconstructed
+        // from Kafka replay if needed.
+        try {
+            taskExecution.upsert(taskCommand);
+        } catch (RuntimeException e) {
+            log.error("task_execution upsert failed for eventId={} corrId={} — continuing to barrier update: {}",
+                    taskCommand.getEventId(), taskCommand.getCorrelationId(), e.getMessage(), e);
+        }
+
+        // Step 2 — drive the barrier. Exceptions here propagate to
+        // TaskCommandListener's catch-all (which logs + acks); @Transactional
+        // on applyTaskEvent ensures DB state rolls back on failure and any
+        // runAfterCommit hooks are never fired.
         barrier.applyTaskEvent(taskCommand);
     }
 

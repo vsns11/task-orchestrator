@@ -1,5 +1,6 @@
 package ca.siva.orchestrator.dag;
 
+import ca.siva.orchestrator.domain.ExecutionMode;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -69,8 +70,28 @@ public class DagDefinition {
     @Getter @Setter @NoArgsConstructor
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class ActionDef {
-        private String                                    actionName;
-        private ca.siva.orchestrator.domain.ExecutionMode executionMode;
+        private String        actionName;
+        private ExecutionMode executionMode;
+
+        /**
+         * Optional discriminator for the DCX lookup's composite key
+         * {@code (actionCode,flowType,modemType)}. When omitted, the
+         * registry falls back to the DEFAULT/DEFAULT row — matching the
+         * ActionBuilder convention where flows that don't differentiate
+         * by business flow type hit the single shared row.
+         *
+         * <p>Corresponds to {@code bpmnType} on the upstream
+         * {@code ActionBuilder.getDcxCodeByActionName} call.</p>
+         */
+        private String flowType;
+
+        /**
+         * Optional modem-type discriminator for the DCX lookup's composite
+         * key {@code (actionCode,flowType,modemType)}. When omitted, the
+         * registry falls back to the DEFAULT slot (or the kickout branch
+         * when the actionCode starts with {@code '0'}).
+         */
+        private String modemType;
 
         /**
          * List of actionNames whose results this action needs.
@@ -81,6 +102,6 @@ public class DagDefinition {
          * <p>Example: if sendNotification depends on runVoiceDiagnostic's result,
          * set {@code dependsOn: [runVoiceDiagnostic]}.</p>
          */
-        private java.util.List<String> dependsOn;
+        private List<String> dependsOn;
     }
 }

@@ -3,7 +3,8 @@
 
 spring:
   profiles:
-    active: db, kafka, orchestration, local-dev
+    # integrationtest is loaded LAST so its overrides win over application-orchestration.yml
+    active: db, kafka, orchestration, local-dev, integrationtest
 
   jpa:
     database-platform: org.hibernate.dialect.PostgreSQLDialect

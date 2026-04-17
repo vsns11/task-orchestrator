@@ -1,5 +1,7 @@
 package ca.siva.orchestrator.service;
 
+import ca.siva.orchestrator.domain.ExecutionMode;
+import ca.siva.orchestrator.domain.TaskStatus;
 import ca.siva.orchestrator.dto.ActionResponse;
 import ca.siva.orchestrator.dto.TaskCommand;
 import ca.siva.orchestrator.entity.TaskExecution;
@@ -41,14 +43,14 @@ class TaskExecutionServiceTest {
         TaskExecution saved = captor.getValue();
         assertThat(saved.getActionName()).isEqualTo("testAction");
         assertThat(saved.getActionCode()).isEqualTo("TEST_ACTION");
-        assertThat(saved.getStatus()).isEqualTo(ca.siva.orchestrator.domain.TaskStatus.COMPLETED);
+        assertThat(saved.getStatus()).isEqualTo(TaskStatus.COMPLETED);
     }
 
     @Test
     void upsert_existingExecution_updatesStatus_withoutExplicitSave() {
         var existing = new TaskExecution();
         existing.setId(new TaskExecutionId("corr-1", "tf-1"));
-        existing.setStatus(ca.siva.orchestrator.domain.TaskStatus.IN_PROGRESS);
+        existing.setStatus(TaskStatus.IN_PROGRESS);
         when(repo.findById(any())).thenReturn(Optional.of(existing));
 
         var testCommand = buildTaskCommand();
@@ -57,7 +59,7 @@ class TaskExecutionServiceTest {
         // For existing managed entities, dirty-checking handles the UPDATE at commit.
         // No explicit save() needed.
         verify(repo, never()).save(any());
-        assertThat(existing.getStatus()).isEqualTo(ca.siva.orchestrator.domain.TaskStatus.COMPLETED);
+        assertThat(existing.getStatus()).isEqualTo(TaskStatus.COMPLETED);
     }
 
     @Test
@@ -78,7 +80,7 @@ class TaskExecutionServiceTest {
         Instant now = Instant.now();
         var testCommand = buildTaskCommand();
         testCommand.setExecution(TaskCommand.Execution.builder()
-                .mode(ca.siva.orchestrator.domain.ExecutionMode.SYNC).startedAt(now).finishedAt(now).durationMs(500L)
+                .mode(ExecutionMode.SYNC).startedAt(now).finishedAt(now).durationMs(500L)
                 .build());
 
         service.upsert(testCommand);
@@ -92,7 +94,7 @@ class TaskExecutionServiceTest {
     private static TaskCommand buildTaskCommand() {
         var testCommand = new TaskCommand();
         testCommand.setCorrelationId("corr-1");
-        testCommand.setStatus(ca.siva.orchestrator.domain.TaskStatus.COMPLETED);
+        testCommand.setStatus(TaskStatus.COMPLETED);
         testCommand.setAction(TaskCommand.Action.builder()
                 .actionName("testAction").actionCode("TEST_ACTION").build());
         testCommand.setBatch(TaskCommand.Batch.builder().index(0).build());

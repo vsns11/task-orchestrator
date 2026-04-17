@@ -211,7 +211,7 @@ schemaVersion:  1.0
 | `trigger` | object | On `task.signal`: which external event triggered this signal. |
 | `inputs.processFlow` | object | Full TMF-701 processFlow object passed forward to the runner. |
 | `inputs.downstream` | object | On `task.signal`: tells the runner which downstream URL to fetch. |
-| `result` | `ActionResponse` | Present on `task.event` with `status=COMPLETED` (and `WAITING` for ASYNC). Carries two payloads: `taskResult` (raw downstream response, loosely-typed `Object` — `JsonNode` / `Map` / domain DTO) and `taskFlowResponse` (typed TMF-701 `TaskFlow`: `id`, `href`, `state`, `characteristic[]`). The orchestrator reads the taskFlow `href` from `taskFlowResponse` to PATCH the parent processFlow. |
+| `result` | `ActionResponse` | Present on `task.event` with `status=COMPLETED` (and `WAITING` for ASYNC). Carries two payloads: `taskResult` (raw downstream response, loosely-typed `Object` — `JsonNode` / `Map` / domain DTO) and `taskFlowResponse` (typed TMF-701 `TaskFlow`: `id`, `href`, `state`, `characteristic[]`). The orchestrator reads the taskFlow `href` from `taskFlowResponse` to PATCH the parent processFlow. On `COMPLETED` it is **also validated**: `result.taskStatusCode` must be `COMPLETED` and, if present, `taskFlowResponse.characteristic[name=status].value` must equal `pass` (case-insensitive) — otherwise the event is rejected and the flow is failed. |
 | `error` | object | Present on `task.event` with `status=FAILED`. |
 
 ---
@@ -845,7 +845,7 @@ The per-taskFlow PATCH (writing the actual result back to the taskFlow itself) i
 | `task.execute` | task-orchestrator | Ignore (own message) |
 | `task.event` (status=INITIAL or IN_PROGRESS) | task-runner | Upsert `task_execution`; no barrier change |
 | `task.event` (status=WAITING) | task-runner | Upsert `task_execution`; PATCH parent processFlow with new taskFlow ref; no barrier change |
-| `task.event` (status=COMPLETED) | task-runner | Upsert `task_execution`; PATCH parent processFlow if needed; barrier `task_completed += 1`; if `pending==0` → CLOSE batch, lazy-seed next batch (if any) and publish its `task.execute` messages, else PATCH processFlow `state=completed` |
+| `task.event` (status=COMPLETED) | task-runner | Upsert `task_execution`; **validate `result.taskStatusCode == COMPLETED` and (if present) `taskFlowResponse.characteristic[name=status].value == pass` — if either check fails the event is rejected, the barrier flips to FAILED, and the processFlow is PATCHed `state=failed`**; otherwise PATCH parent processFlow if needed; barrier `task_completed += 1`; if `pending==0` → CLOSE batch, lazy-seed next batch (if any) and publish its `task.execute` messages, else PATCH processFlow `state=completed` |
 | `task.event` (status=FAILED, retryable=false) | task-runner | Upsert `task_execution`; barrier `task_failed += 1`, status=FAILED; PATCH processFlow `state=failed` |
 | `task.signal` | pamconsumer | Log only (observability) |
 

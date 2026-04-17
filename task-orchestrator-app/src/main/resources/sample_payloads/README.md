@@ -145,6 +145,27 @@ slots:
 | `taskResult`      | `Object` (free-form)    | Raw downstream response body — `JsonNode`, `Map`, or a domain DTO. Whatever the runner received from the downstream call. Used for `dependencyResults` pass-through and audit. |
 | `taskFlowResponse`| TMF-701 `TaskFlow`      | Typed: `id`, `href`, `state`, `characteristic[]`. The orchestrator reads `href` here to PATCH the parent processFlow, and iterates `characteristic[]` looking for a `status` entry — if present and not `pass` (case-insensitive), the COMPLETED event is rejected and the flow is failed. Domain outputs (`status`, `diagnosticSummary`, …) are emitted here as `characteristic` entries per TMF convention. |
 
+### COMPLETED validation contract
+
+When a `task.event` arrives with envelope `status=COMPLETED`, the orchestrator
+runs a second-level check against the embedded `result` (`ActionResponse`)
+before advancing the barrier:
+
+1. If `result.taskStatusCode` is present and not `COMPLETED` (case-insensitive)
+   → reject, close the barrier as `FAILED`, PATCH parent processFlow
+   `state=failed`, and emit `flow.lifecycle FAILED`.
+2. Else, if `result.taskFlowResponse.characteristic[]` contains an entry with
+   `name=status` whose `value` is present and not `pass` (case-insensitive)
+   → reject, same failure path.
+3. Else (including when `result` is `null`, `taskFlowResponse` is `null`, or no
+   `status` characteristic is present) → accept, barrier advances.
+
+A task-runner may therefore return a COMPLETED envelope while embedding a
+business failure; the orchestrator treats that as a terminal failure of the
+flow. Runners MUST populate both `taskStatusCode=COMPLETED` and
+`taskFlowResponse.characteristic[name=status].value=pass` on successful
+completion (see scenario `08_*` / `05_*` files under each DAG).
+
 ---
 
 ## Conventions

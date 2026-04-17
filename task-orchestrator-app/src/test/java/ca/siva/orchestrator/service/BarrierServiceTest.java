@@ -9,10 +9,12 @@ import ca.siva.orchestrator.domain.TaskStatus;
 import ca.siva.orchestrator.dto.ActionResponse;
 import ca.siva.orchestrator.dto.TaskCommand;
 import ca.siva.orchestrator.dto.tmf.ProcessFlow;
+import ca.siva.orchestrator.dto.tmf.TaskFlow;
 import ca.siva.orchestrator.entity.BatchBarrier;
 import ca.siva.orchestrator.entity.BatchBarrierId;
 import ca.siva.orchestrator.kafka.TaskCommandFactory;
 import ca.siva.orchestrator.kafka.TaskCommandPublisher;
+import ca.siva.orchestrator.kafka.TaskEventsPublisher;
 import ca.siva.orchestrator.repository.BatchBarrierRepository;
 import ca.siva.orchestrator.repository.TaskExecutionRepository;
 import org.junit.jupiter.api.Test;
@@ -21,6 +23,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -40,7 +43,7 @@ class BarrierServiceTest {
     @Mock TaskCommandFactory taskCommandFactory;
     @Mock TaskCommandPublisher publisher;
     @Mock Tmf701Client tmf701;
-    @Mock ca.siva.orchestrator.kafka.TaskEventsPublisher taskEventsPublisher;
+    @Mock TaskEventsPublisher taskEventsPublisher;
     @InjectMocks BarrierService service;
 
     @Test
@@ -82,7 +85,7 @@ class BarrierServiceTest {
         // Only 1 batch in DAG — after closing batch 0, flow completes
         when(dagRegistry.find("TestDAG")).thenReturn(Optional.of(dagWithBatches(1)));
 
-        var taskCommand =buildTaskCommand(TaskStatus.COMPLETED, 0);
+        var taskCommand = buildTaskCommand(TaskStatus.COMPLETED, 0);
         service.applyTaskEvent(taskCommand);
 
         assertThat(barrier.getStatus()).isEqualTo(BarrierStatus.CLOSED);
@@ -125,7 +128,7 @@ class BarrierServiceTest {
         var barrier = barrierWithTotal(2, 0);
         when(repo.findById(any(BatchBarrierId.class))).thenReturn(Optional.of(barrier));
 
-        var taskCommand =buildTaskCommand(TaskStatus.FAILED, 0);
+        var taskCommand = buildTaskCommand(TaskStatus.FAILED, 0);
         taskCommand.setError(TaskCommand.ErrorInfo.builder().retryable(false).build());
         service.applyTaskEvent(taskCommand);
 
@@ -138,7 +141,7 @@ class BarrierServiceTest {
         var barrier = barrierWithTotal(2, 0);
         when(repo.findById(any(BatchBarrierId.class))).thenReturn(Optional.of(barrier));
 
-        var taskCommand =buildTaskCommand(TaskStatus.FAILED, 0);
+        var taskCommand = buildTaskCommand(TaskStatus.FAILED, 0);
         taskCommand.setError(TaskCommand.ErrorInfo.builder().retryable(true).build());
         service.applyTaskEvent(taskCommand);
 
@@ -153,7 +156,7 @@ class BarrierServiceTest {
 
     @Test
     void applyTaskEvent_missingStatus_ignored() {
-        var taskCommand =buildTaskCommand((TaskStatus) null, 0);
+        var taskCommand = buildTaskCommand(null, 0);
         taskCommand.setStatus(null);
         service.applyTaskEvent(taskCommand);
         verifyNoInteractions(repo, tmf701);
@@ -161,7 +164,7 @@ class BarrierServiceTest {
 
     @Test
     void applyTaskEvent_missingBatchIndex_ignored() {
-        var taskCommand =new TaskCommand();
+        var taskCommand = new TaskCommand();
         taskCommand.setEventId("e-1");
         taskCommand.setCorrelationId("corr-1");
         taskCommand.setStatus(TaskStatus.COMPLETED);
@@ -174,7 +177,7 @@ class BarrierServiceTest {
     private static DagDefinition dagWithBatches(int batchCount) {
         var dag = new DagDefinition();
         dag.setDagKey("TestDAG");
-        var batches = new java.util.ArrayList<DagDefinition.BatchDef>();
+        var batches = new ArrayList<DagDefinition.BatchDef>();
         for (int i = 0; i < batchCount; i++) {
             var batch = new DagDefinition.BatchDef();
             batch.setIndex(i);
@@ -202,19 +205,93 @@ class BarrierServiceTest {
     }
 
     private static TaskCommand buildTaskCommand(TaskStatus status, int batchIndex) {
-        var taskCommand =new TaskCommand();
+        var taskCommand = new TaskCommand();
         taskCommand.setEventId("e-" + System.nanoTime());
         taskCommand.setCorrelationId("corr-1");
         taskCommand.setStatus(status);
         taskCommand.setBatch(TaskCommand.Batch.builder().index(batchIndex).build());
         taskCommand.setAction(TaskCommand.Action.builder()
                 .actionName("testAction").actionCode("TEST_ACTION").build());
+        // Payload shape mirrors what MockTaskRunner (and production task-runners)
+        // emit: taskStatusCode=COMPLETED on the envelope-level result, plus a
+        // status=pass characteristic on the TMF-701 taskFlowResponse. This keeps
+        // BarrierService.validateActionResponse on its happy path so the barrier
+        // logic is exercised end-to-end.
         taskCommand.setResult(ActionResponse.builder()
                 .name("testAction").code("TEST_ACTION").id("tf-1").type("TaskFlow")
                 .taskResult(Map.of("downstream", "ok"))
-                .taskFlowResponse(ca.siva.orchestrator.dto.tmf.TaskFlow.builder()
-                        .id("tf-1").href("http://mock/tf-1").build())
+                .taskFlowResponse(TaskFlow.builder()
+                        .id("tf-1")
+                        .href("http://mock/tf-1")
+                        .characteristic(List.of(
+                                ProcessFlow.Characteristic.builder()
+                                        .name("status").value("pass").build()))
+                        .build())
                 .taskStatusCode("COMPLETED").build());
         return taskCommand;
+    }
+
+    // =================================================================
+    //  ActionResponse validation — BarrierService.validateActionResponse
+    //  rejects COMPLETED task.events whose embedded business status
+    //  indicates a failure, even though the envelope-level status is
+    //  COMPLETED. These tests lock that contract in place.
+    // =================================================================
+
+    @Test
+    void applyTaskEvent_completed_rejectsWhenTaskStatusCodeNotCompleted() {
+        var barrier = barrierWithTotal(1, 0);
+        when(repo.findById(any(BatchBarrierId.class))).thenReturn(Optional.of(barrier));
+
+        var taskCommand = buildTaskCommand(TaskStatus.COMPLETED, 0);
+        // Task-runner reported COMPLETED on the envelope but the embedded
+        // actionResponse carries a non-COMPLETED status — must fail the flow.
+        taskCommand.getResult().setTaskStatusCode("FAILED");
+        service.applyTaskEvent(taskCommand);
+
+        assertThat(barrier.getStatus()).isEqualTo(BarrierStatus.FAILED);
+        assertThat(barrier.getTaskCompleted()).isZero();
+        verify(tmf701).patchProcessFlowState(anyString(), eq("failed"));
+    }
+
+    @Test
+    void applyTaskEvent_completed_rejectsWhenStatusCharacteristicNotPass() {
+        var barrier = barrierWithTotal(1, 0);
+        when(repo.findById(any(BatchBarrierId.class))).thenReturn(Optional.of(barrier));
+
+        var taskCommand = buildTaskCommand(TaskStatus.COMPLETED, 0);
+        // Overwrite the happy-path taskFlowResponse with a status=fail
+        // characteristic — simulates a downstream returning business-level
+        // failure under a COMPLETED envelope.
+        taskCommand.getResult().setTaskFlowResponse(TaskFlow.builder()
+                .id("tf-1")
+                .href("http://mock/tf-1")
+                .characteristic(List.of(
+                        ProcessFlow.Characteristic.builder()
+                                .name("status").value("fail").build()))
+                .build());
+        service.applyTaskEvent(taskCommand);
+
+        assertThat(barrier.getStatus()).isEqualTo(BarrierStatus.FAILED);
+        assertThat(barrier.getTaskCompleted()).isZero();
+        verify(tmf701).patchProcessFlowState(anyString(), eq("failed"));
+    }
+
+    @Test
+    void applyTaskEvent_completed_acceptsWhenTaskFlowResponseMissing() {
+        // validateActionResponse returns "no rejection" when the
+        // taskFlowResponse is absent — the envelope-level COMPLETED is
+        // trusted. The PATCH relatedEntity is skipped (no href to send)
+        // but the barrier still advances.
+        var barrier = barrierWithTotal(1, 0);
+        when(repo.findById(any(BatchBarrierId.class))).thenReturn(Optional.of(barrier));
+        when(dagRegistry.find("TestDAG")).thenReturn(Optional.of(dagWithBatches(1)));
+
+        var taskCommand = buildTaskCommand(TaskStatus.COMPLETED, 0);
+        taskCommand.getResult().setTaskFlowResponse(null);
+        service.applyTaskEvent(taskCommand);
+
+        assertThat(barrier.getStatus()).isEqualTo(BarrierStatus.CLOSED);
+        assertThat(barrier.getTaskCompleted()).isEqualTo(1);
     }
 }

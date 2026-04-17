@@ -1,19 +1,18 @@
 package ca.siva.orchestrator.kafka;
 
-import ca.siva.orchestrator.actionregistry.ActionDefinition;
 import ca.siva.orchestrator.actionregistry.ActionRegistry;
 import ca.siva.orchestrator.dag.DagDefinition;
-import ca.siva.orchestrator.domain.MessageName;
 import ca.siva.orchestrator.domain.ExecutionMode;
 import ca.siva.orchestrator.domain.Intent;
+import ca.siva.orchestrator.domain.MessageName;
 import ca.siva.orchestrator.domain.MessageType;
 import ca.siva.orchestrator.domain.Sources;
 import ca.siva.orchestrator.dto.TaskCommand;
 import ca.siva.orchestrator.dto.TaskCommand.Action;
-import ca.siva.orchestrator.dto.tmf.ProcessFlow;
 import ca.siva.orchestrator.dto.TaskCommand.Batch;
 import ca.siva.orchestrator.dto.TaskCommand.Execution;
 import ca.siva.orchestrator.dto.TaskCommand.Inputs;
+import ca.siva.orchestrator.dto.tmf.ProcessFlow;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -22,6 +21,8 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+
+import static ca.siva.orchestrator.actionregistry.ActionNames.DEFAULT;
 
 /**
  * Factory for constructing {@link TaskCommand} messages.
@@ -40,11 +41,10 @@ public class TaskCommandFactory {
 
     /** Creates a base envelope with metadata fields populated. */
     public TaskCommand buildBase(String correlationId, String messageName,
-                                            MessageType messageType, String source) {
+                                 MessageType messageType, String source) {
         TaskCommand taskCommand = new TaskCommand();
         taskCommand.setEventId(UUID.randomUUID().toString());
         taskCommand.setCorrelationId(correlationId);
-        
         taskCommand.setEventTime(Instant.now());
         taskCommand.setMessageType(messageType);
         taskCommand.setMessageName(messageName);
@@ -74,24 +74,55 @@ public class TaskCommandFactory {
                                                            DagDefinition.ActionDef actionDef,
                                                            ProcessFlow processFlow,
                                                            Map<String, Object> dependencyResults) {
-        // Chained lookup: actionName → actionCode → dcxActionCode
-        Optional<ActionDefinition> resolvedOpt = actionRegistry.resolve(actionDef.getActionName());
-        if (resolvedOpt.isEmpty()) {
-            log.warn("Unknown actionName={} in DAG {} - skipping", actionDef.getActionName(), dagKey);
+        // Defensive guards: a malformed DAG YAML (missing actionName, empty
+        // actions list on a batch) must not explode with NPE here — return
+        // empty so the caller treats the slot as "nothing to publish" and logs
+        // a warning instead of failing the whole batch seed.
+        if (actionDef == null || actionDef.getActionName() == null || actionDef.getActionName().isBlank()) {
+            log.warn("Skipping task.execute build for DAG {} — actionDef is null or missing actionName", dagKey);
             return Optional.empty();
         }
-        ActionDefinition actionIdentity = resolvedOpt.get();
+        if (batch == null || batch.getActions() == null) {
+            log.warn("Skipping task.execute build for DAG {} — batch is null or has no actions list", dagKey);
+            return Optional.empty();
+        }
+        String actionName = actionDef.getActionName();
+
+        // Step 1 (ActionBuilder.getActionCode): actionName → actionCode.
+        // We short-circuit the command if the name is unknown — publishing a
+        // task.execute without an actionCode would cause the task-runner to
+        // reject it anyway.
+        String actionCode = actionRegistry.getActionCodeByName(actionName);
+        if (actionCode == null) {
+            log.warn("Unknown actionName={} in DAG {} - skipping (not in action-code registry)",
+                    actionName, dagKey);
+            return Optional.empty();
+        }
+
+        // Step 2 (ActionBuilder.getDcxCodeByActionName): actionName + flowType
+        // + modemType → dcxActionCode, with codeStartsWith0 branching and
+        // DEFAULT/DEFAULT fallback inside the registry. flowType/modemType come
+        // from the DAG action when present; otherwise they default to DEFAULT,
+        // matching the single-row case that covers most real data.
+        String flowType  = nonBlankOrDefault(actionDef.getFlowType());
+        String modemType = nonBlankOrDefault(actionDef.getModemType());
+        String dcxActionCode = actionRegistry.getDcxActionCodeByName(actionName, flowType, modemType);
+        if (dcxActionCode == null) {
+            log.warn("No dcxActionCode for actionName={} actionCode={} flowType={} modemType={}"
+                            + " — publishing task.execute with null dcxActionCode",
+                    actionName, actionCode, flowType, modemType);
+        }
 
         TaskCommand taskCommand = buildBase(correlationId, MessageName.TASK_EXECUTE.getValue(),
                 MessageType.COMMAND, Sources.TASK_ORCHESTRATOR);
         taskCommand.setIntent(Intent.EXECUTE);
         taskCommand.setDagKey(dagKey);
 
-        // Action identity from registry, actionName from DAG
+        // Action identity hydrated from the registry via the two direct calls above.
         taskCommand.setAction(Action.builder()
-                .actionName(actionDef.getActionName())
-                .actionCode(actionIdentity.actionCode())
-                .dcxActionCode(actionIdentity.dcxActionCode())
+                .actionName(actionName)
+                .actionCode(actionCode)
+                .dcxActionCode(dcxActionCode)
                 .build());
 
         taskCommand.setBatch(Batch.builder()
@@ -113,5 +144,15 @@ public class TaskCommandFactory {
         taskCommand.setInputs(inputsBuilder.build());
 
         return Optional.of(taskCommand);
+    }
+
+    /**
+     * Coerces blank/null DAG discriminators to {@link ActionNames#DEFAULT} so
+     * the composite DCX key has a concrete value in every slot — matches the
+     * ActionBuilder convention where empty kcontext values resolve to DEFAULT
+     * before {@code buildKeyForDcxActionCode} runs.
+     */
+    private static String nonBlankOrDefault(String value) {
+        return (value == null || value.isBlank()) ? DEFAULT : value;
     }
 }

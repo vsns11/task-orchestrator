@@ -369,6 +369,13 @@ The `result` field is an `ActionResponse` with two payload slots:
 - `taskResult` — the raw downstream response body (any shape: `JsonNode`, `Map`, domain DTO). Used for dependency-result passing between batches and for audit.
 - `taskFlowResponse` — the typed TMF-701 `TaskFlow` resource (`id`, `href`, `state`, `characteristic[]`). The orchestrator reads `href` from here to PATCH the parent processFlow.
 
+**COMPLETED validation.** Before advancing the barrier, the orchestrator also checks:
+
+1. `result.taskStatusCode` must equal `COMPLETED` (case-insensitive) when present.
+2. If `taskFlowResponse.characteristic[]` carries a `status` entry, its value must equal `pass` (case-insensitive).
+
+If either check fails, the `task.event` is rejected: the barrier is closed with `status=FAILED`, the parent processFlow is PATCHed `state=failed`, and a `flow.lifecycle FAILED` event is published. Task-runners must therefore emit both `taskStatusCode="COMPLETED"` AND `characteristic: [{"name":"status","value":"pass"}]` for a successful completion.
+
 **What the Orchestrator does:**
 1. Inserts `task_execution` row: `process_flow_id=bbf5e84d, task_flow_id=tf-ca72d013, status=COMPLETED`
 2. PATCHes TMF-701 — registers taskFlowId + href on the processFlow:

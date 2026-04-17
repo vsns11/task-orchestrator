@@ -95,8 +95,20 @@ public class TaskExecutionService {
         try {
             return mapper.writeValueAsString(o);
         } catch (JsonProcessingException e) {
-            log.warn("Could not serialize: {}", e.getMessage());
-            return null;
+            // Don't silently persist NULL — a downstream query reading
+            // result_json can't distinguish "no result" from "serialization
+            // failed". Store a tiny JSON marker so forensics have the failure
+            // reason and the payload class visible in the row.
+            log.warn("Could not serialize {} — persisting error marker: {}",
+                    o.getClass().getSimpleName(), e.getMessage());
+            return "{\"_serializationError\":\"" + escapeJson(e.getMessage())
+                    + "\",\"_class\":\"" + o.getClass().getName() + "\"}";
         }
+    }
+
+    /** Minimal JSON-string escape for the serialization-failure marker. */
+    private static String escapeJson(String s) {
+        if (s == null) return "";
+        return s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", " ").replace("\r", " ");
     }
 }

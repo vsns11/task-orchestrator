@@ -31,3 +31,121 @@ orchestrator:
     action-codes-path: /action-codes
     dcx-action-codes-path: /dcx-action-codes
     reload-cron: "0 0 2 * * *"
+    # Allowlist of actionNames that MUST be present in the action-code registry
+    # at the FIRST load (ApplicationReadyEvent). If any entry is missing, the
+    # JVM exits so the pod manager restarts rather than serving traffic with
+    # an incomplete registry. Scheduled reloads never consult this list.
+    # Add/remove entries here — no code change needed.
+    required-action-names:
+      # 1000 series — ticketing, MOI, diagnostics, decisions
+      - FindTroubleTicket
+      - RetrieveTroubleTicket
+      - SubmitTroubleTicket
+      - ModifyTroubleTicket
+      - MOI
+      - Internet Service Diagnostic
+      - Voice Service Diagnostic
+      - Find Device Configuration (Banding Table)
+      - ACUT Orchestrator
+      - Dispatch Decision
+      - FSAI TTD Selector
+      - Retrieve Voice Service Diagnostic
+      - AD User Validation
+      - AD Duplicate Check
+      - ACUT Categorize Decision
+      - ACUT Check Pattern
+      - CNP Outage Check
+      - ACUT Check Pattern Parallel
+      - FSBI Alert
+      # 2000 series — remediation
+      - Create Service Problem
+      - Fix/Correct BRAS Config
+      - Build VCC 35/36
+      - Port Reset
+      - Correct FEC
+      - FTTN/Change speed profile
+      - SpeedOptimizerAPI
+      - FSAI FTTH Change Speed Profile
+      - FSAI Copper Speed Optimizer
+      # 3000 series — modem / ONT lifecycle
+      - Modem Speed Test
+      - Audit, Clean and Rebuild ONT Port
+      - Modem Online
+      - Modem Factory Reset
+      - ONT Reset
+      - ATA MAC Address Change
+      - ATA Voice Reprovisioning
+      - ATA MAC Address Change Parallel
+      - Voice Reprovisioning
+      - Modem Online Loop
+      - Reboot Sequence
+      - Speed Test Orchestrator
+      - STB Reboot Sequence
+      - Modem Reboot
+      - FSAI Modem Reboot
+      - STB Online
+      - Modem Firmware Update
+      - Modem Firmware Update Sequence
+      - Firmware Check
+      - Modem Mailout
+      - Find Modem Mailout
+      - Email Pickup Modem In Store
+      - STB Reboot
+      - STB Reset
+      - Clean ONT
+      - Create ONT
+      - Add HSI
+      - Add Multiservice
+      - Set Advance WiFi On
+      - Set Advance WiFi Off
+      - CPM
+      # Investigators / diagnostics
+      - IM Test Result KPI Investigator
+      - IM Consumer Device Investigator
+      - IM QoS Investigator
+      - IM Service Summary Investigator
+      - IM GIN Investigator
+      - FSAI Mariner Investigator Task
+      - Merlin Diagnostic Test
+      - Merlin Historical
+      # POD / device-QoE
+      - View POD
+      - Access POD
+      - Device QoE
+      - Node QoE
+      - Locate POD
+      # 6000 series — CDA manual reboots / recommendations
+      - CDA Manual Reboot 6010
+      - CDA Manual Reboot 6011
+      - CDA Manual Reboot 6012
+      - CDA Manual Reboot 6013
+      - CDA Manual Reboot 6014
+      - CDA Manual Reboot 6080
+      - CDA Manual STB Reboot 6852
+      - CDA Manual STB Reboot 6896
+      - CDA Recommend to perform Correct FEC
+      - Recommend to perform Modem Optimize Speed
+      - Did this resolve your issue?
+      - AR available
+      - What's the problem ?
+      # 7000 series — VR / dispatch / kickout outcomes
+      - VR Success
+      - VR Failure Generic Kickout
+      - Dispatch Already Booked
+      - Active outage (CNP or ACUT PATTERN)
+      - Dispatch Required
+      - Existing ACUT Ticket in play
+      - Account not found in MOI inventory
+      - Max FSBI Step Limits
+      - Modem Reboot failure
+      - STB Reboot failure
+      - Outside Hardware Check failure
+      - Speed Test failure
+      - Voice/VOIP Re-provisioning Failure
+      - Modem Mailout Kickout
+      - Auto Remediation not available
+      - Not able to create ACUT ticket
+      - Access not found in MOI inventory
+      - Unhappy path - Katsumi not active
+      # 7100 series — timeouts
+      - Timeout has occurred
