@@ -30,9 +30,29 @@ set -euo pipefail
 BROKER="${BROKER:-localhost:9092}"
 TOPIC="${TOPIC:-task.command}"
 SAMPLES="${SAMPLES:-task-orchestrator-app/src/main/resources/sample_payloads}"
-PG_CONTAINER="${PG_CONTAINER:-orchestrator-postgres}"
 PG_USER="${PG_USER:-orchestrator}"
 PG_DB="${PG_DB:-orchestrator}"
+
+# Resolve the Postgres container name dynamically — no dependency on
+# container_name: in compose files (which may auto-generate names like
+# "myproj-postgres-1" or "myproj_postgres_1"). Priority:
+#   1. User-set PG_CONTAINER (explicit override wins).
+#   2. Running container whose IMAGE contains "postgres" (works for
+#      postgres, postgres:16-alpine, timescale/postgres-*, etc.).
+#   3. Running container whose NAME contains "postgres" (catches
+#      custom images where the tag doesn't mention postgres).
+# If none match, ensure_pg_container() fails with a diagnostic.
+resolve_pg_container() {
+  [[ -n "${PG_CONTAINER:-}" ]] && return 0
+
+  PG_CONTAINER=$(docker ps --format '{{.Names}}\t{{.Image}}' 2>/dev/null \
+    | awk -F'\t' 'tolower($2) ~ /postgres/ {print $1; exit}')
+  [[ -n "$PG_CONTAINER" ]] && return 0
+
+  PG_CONTAINER=$(docker ps --format '{{.Names}}' 2>/dev/null \
+    | awk 'tolower($0) ~ /postgres/ {print; exit}')
+}
+resolve_pg_container
 
 # Pause (seconds) between ASYNC steps so you can inspect the DB between
 # state transitions (WAITING → signal → COMPLETED). Override with
@@ -85,17 +105,34 @@ pub() {
   sleep 0.8   # give the orchestrator time to react before the next publish
 }
 
+ensure_pg_container() {
+  if [[ -z "${PG_CONTAINER:-}" ]] || ! docker ps --format '{{.Names}}' | grep -qx "$PG_CONTAINER"; then
+    echo "error: could not locate a running Postgres container." >&2
+    [[ -n "${PG_CONTAINER:-}" ]] && echo "       auto-detected / requested name: '$PG_CONTAINER'" >&2
+    echo "" >&2
+    echo "Running containers whose name or image mentions 'postgres':" >&2
+    docker ps --format '  {{.Names}}  (image={{.Image}}, ports={{.Ports}})' \
+      | grep -i postgres >&2 || echo "  (none — is Postgres actually up? try: docker ps)" >&2
+    echo "" >&2
+    echo "Fix: set PG_CONTAINER to the correct container name, e.g." >&2
+    echo "  PG_CONTAINER=<name-from-above> $0 $*" >&2
+    exit 1
+  fi
+}
+
 psql_cmd() {
   docker exec -i "$PG_CONTAINER" psql -U "$PG_USER" -d "$PG_DB" -c "$1"
 }
 
 reset_db() {
+  ensure_pg_container
   echo "Truncating task_execution, batch_barrier ..."
   psql_cmd "TRUNCATE task_execution, batch_barrier;"
   echo "done."
 }
 
 verify() {
+  ensure_pg_container
   local cid="${1:-}"
   local where="WHERE process_flow_id = '${cid}'"
   [[ -z "$cid" ]] && where=""
