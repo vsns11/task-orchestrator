@@ -73,9 +73,27 @@ if [[ -z "${PRODUCER:-}" ]]; then
   fi
 fi
 
+# Admin binary (kafka-topics) — same auto-detect pattern as the producer.
+if [[ -z "${KAFKA_TOPICS:-}" ]]; then
+  if command -v kafka-topics.bat >/dev/null 2>&1; then
+    KAFKA_TOPICS="kafka-topics.bat"
+  elif command -v kafka-topics.sh >/dev/null 2>&1; then
+    KAFKA_TOPICS="kafka-topics.sh"
+  elif command -v kafka-topics    >/dev/null 2>&1; then
+    KAFKA_TOPICS="kafka-topics"
+  else
+    KAFKA_TOPICS="kafka-topics.bat"
+  fi
+fi
+
 # Key separator. Pipe "|" is safe because jq -c never emits literal pipes
 # in the compacted sample payloads. Override if your payloads include "|".
 KEY_SEP="${KEY_SEP:-|}"
+
+# Topics to wipe before each scenario run. Override CLEAR_TOPICS to
+# change the set (space-separated); override AUTO_CLEAR=0 to skip.
+CLEAR_TOPICS="${CLEAR_TOPICS:-task.command notification.management}"
+AUTO_CLEAR="${AUTO_CLEAR:-1}"
 
 # ---------- helpers ----------
 
@@ -83,6 +101,7 @@ need() { command -v "$1" >/dev/null 2>&1 || { echo "missing on PATH: $1"; exit 1
 need jq
 need docker
 need "$PRODUCER"
+need "$KAFKA_TOPICS"
 
 pub() {
   local file="$1"
@@ -131,6 +150,60 @@ reset_db() {
   echo "done."
 }
 
+# Wipe a single Kafka topic by deleting and recreating it with the same
+# partition count (so the orchestrator's consumer-group assignment still
+# makes sense). Works across Apache tarball and Homebrew/Confluent CLIs.
+clear_topic() {
+  local t="$1"
+  local desc partitions replication
+  desc=$(MSYS_NO_PATHCONV=1 "$KAFKA_TOPICS" --bootstrap-server "$BROKER" \
+           --describe --topic "$t" 2>/dev/null || true)
+
+  if [[ -z "$desc" ]]; then
+    echo "topic '$t' does not exist — skipping delete, creating fresh."
+    MSYS_NO_PATHCONV=1 "$KAFKA_TOPICS" --bootstrap-server "$BROKER" \
+      --create --topic "$t" --partitions 3 --replication-factor 1 \
+      2>&1 | grep -v -E '^(Warning|Option|\[)' || true
+    return 0
+  fi
+
+  partitions=$(echo "$desc" | awk '/PartitionCount:/ {for (i=1;i<=NF;i++) if ($i=="PartitionCount:") print $(i+1)}' | head -1)
+  replication=$(echo "$desc" | awk '/ReplicationFactor:/ {for (i=1;i<=NF;i++) if ($i=="ReplicationFactor:") print $(i+1)}' | head -1)
+  partitions="${partitions:-3}"
+  replication="${replication:-1}"
+
+  echo "Clearing topic '$t' (partitions=$partitions, replication=$replication)..."
+  MSYS_NO_PATHCONV=1 "$KAFKA_TOPICS" --bootstrap-server "$BROKER" \
+    --delete --topic "$t" 2>&1 | grep -v -E '^(Warning|Option|\[)' || true
+
+  # Brief wait for the delete to settle before recreate.
+  local tries=0
+  while (( tries < 10 )); do
+    if ! MSYS_NO_PATHCONV=1 "$KAFKA_TOPICS" --bootstrap-server "$BROKER" \
+           --list 2>/dev/null | grep -qx "$t"; then
+      break
+    fi
+    sleep 0.5
+    tries=$((tries + 1))
+  done
+
+  MSYS_NO_PATHCONV=1 "$KAFKA_TOPICS" --bootstrap-server "$BROKER" \
+    --create --topic "$t" --partitions "$partitions" --replication-factor "$replication" \
+    2>&1 | grep -v -E '^(Warning|Option|\[)' || true
+}
+
+# Combined pre-run wipe: every CLEAR_TOPICS entry + the orchestrator tables.
+# Called at the start of every run unless AUTO_CLEAR=0 or --no-reset.
+clear_all() {
+  echo "=== Pre-run cleanup (AUTO_CLEAR=1) ==="
+  for t in $CLEAR_TOPICS; do
+    clear_topic "$t"
+  done
+  reset_db
+  echo "=== Cleanup done ==="
+  echo ""
+}
+
 verify() {
   ensure_pg_container
   local cid="${1:-}"
@@ -151,6 +224,8 @@ run_async() {
   [[ -d "$dir" ]] || { echo "scenario dir not found: $dir"; exit 1; }
   local cid
   cid=$(jq -r '.correlationId' "$dir/02_processflow_initiated.json")
+
+  [[ "$AUTO_CLEAR" == "1" ]] && clear_all
 
   pub "$dir/02_processflow_initiated.json"   # START → barrier OPEN, flow.lifecycle INITIAL
   pub "$dir/05_task_event_waiting.json"      # WAITING → task_execution WAITING
@@ -185,6 +260,7 @@ inspect_pause() {
 run_sync() {
   local dir="$SAMPLES/$1"
   [[ -d "$dir" ]] || { echo "scenario dir not found: $dir"; exit 1; }
+  [[ "$AUTO_CLEAR" == "1" ]] && clear_all
   pub "$dir/02_processflow_initiated.json"
   pub "$dir/05_task_event_completed.json"
 }
@@ -193,6 +269,7 @@ run_sync() {
 
 # Parse optional flags that can appear before or after the action name.
 #   -p | --pause <seconds>   override INSPECT_PAUSE
+#   --no-reset               skip the pre-run topic/table wipe (AUTO_CLEAR=0)
 #   -h | --help              usage
 POSITIONAL=()
 while [[ $# -gt 0 ]]; do
@@ -202,6 +279,10 @@ while [[ $# -gt 0 ]]; do
       [[ "$2" =~ ^[0-9]+$ ]] || { echo "error: $1 value must be a non-negative integer, got: $2"; exit 1; }
       INSPECT_PAUSE="$2"
       shift 2
+      ;;
+    --no-reset)
+      AUTO_CLEAR=0
+      shift
       ;;
     -h|--help)
       POSITIONAL+=("help")
@@ -229,6 +310,11 @@ case "$ACTION" in
   reset)
     reset_db
     ;;
+  clear)
+    # Explicit manual wipe — force it on regardless of --no-reset.
+    AUTO_CLEAR=1
+    clear_all
+    ;;
   verify)
     verify "${2:-}"
     ;;
@@ -251,19 +337,28 @@ Actions:
   passwordPushV2            ASYNC flow (default if no action given)
   passwordResetV2           ASYNC flow
   miscellaneous             SYNC flow
-  reset                     truncate orchestrator tables
+  reset                     truncate orchestrator tables only
+  clear                     wipe Kafka topics + truncate tables (manual pre-run)
   verify <correlationId>    inspect DB state for one flow
 
 Flags (can appear before OR after the action):
   -p, --pause <seconds>     override INSPECT_PAUSE for this run (e.g. -p 10)
+      --no-reset            skip the automatic pre-run wipe (AUTO_CLEAR=0)
   -h, --help                show this help
 
+Pre-run cleanup:
+  By default every scenario run first wipes the Kafka topics listed in
+  CLEAR_TOPICS and truncates task_execution + batch_barrier so each run
+  starts from a clean slate. Use --no-reset (or AUTO_CLEAR=0) to skip.
+
 Examples:
-  $0                                     # passwordPushV2 with 30s pauses
+  $0                                     # passwordPushV2 with 30s pauses, auto-clear
   $0 passwordPushV2 -p 10                # pause 10 seconds
   $0 -p 0 passwordResetV2                # no pauses (fastest)
+  $0 --no-reset passwordPushV2           # keep prior topic+db state
   $0 miscellaneous                       # SYNC (pause ignored — no WAITING step)
-  $0 reset
+  $0 reset                               # truncate tables, don't touch topics
+  $0 clear                               # explicit: wipe topics AND tables
   $0 verify 11111111-aaaa-4bbb-8ccc-000000000001
 
 Env overrides:
@@ -271,9 +366,12 @@ Env overrides:
   TOPIC          (current: $TOPIC)
   SAMPLES        (current: $SAMPLES)
   PRODUCER       (current: $PRODUCER)
+  KAFKA_TOPICS   (current: $KAFKA_TOPICS)
   KEY_SEP        (current: $KEY_SEP)
   PG_CONTAINER   (current: $PG_CONTAINER)
   INSPECT_PAUSE  (current: ${INSPECT_PAUSE}s — pause between ASYNC steps; 0 = no pause)
+  AUTO_CLEAR     (current: $AUTO_CLEAR — 1=wipe topics+DB before each run, 0=skip)
+  CLEAR_TOPICS   (current: $CLEAR_TOPICS)
 EOF
     ;;
   *)
@@ -281,18 +379,21 @@ EOF
 Unknown action: $ACTION
 
 Usage:
-  $0 [-p <seconds>] <action>
+  $0 [-p <seconds>] [--no-reset] <action>
 
-Actions:     passwordPushV2 | passwordResetV2 | miscellaneous | reset | verify <cid>
+Actions:     passwordPushV2 | passwordResetV2 | miscellaneous | reset | clear | verify <cid>
 
 Env overrides:
   BROKER         (current: $BROKER)
   TOPIC          (current: $TOPIC)
   SAMPLES        (current: $SAMPLES)
   PRODUCER       (current: $PRODUCER)
+  KAFKA_TOPICS   (current: $KAFKA_TOPICS)
   KEY_SEP        (current: $KEY_SEP)
   PG_CONTAINER   (current: $PG_CONTAINER)
   INSPECT_PAUSE  (current: ${INSPECT_PAUSE}s — pause between ASYNC steps; 0 = no pause)
+  AUTO_CLEAR     (current: $AUTO_CLEAR — 1=wipe topics+DB before each run, 0=skip)
+  CLEAR_TOPICS   (current: $CLEAR_TOPICS)
 EOF
     exit 1
     ;;
