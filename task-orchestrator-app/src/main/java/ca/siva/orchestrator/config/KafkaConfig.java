@@ -43,24 +43,17 @@ import java.util.Map;
  *       deserializes into {@link NotificationEvent}</li>
  * </ul>
  *
- * <p>Error handling: each listener retries up to 3 times with 500 ms fixed backoff.
- * If processing still fails, {@link ca.siva.orchestrator.kafka.TaskCommandListener}
- * logs the exception and acknowledges the message so the consumer can move on
- * (no dead-letter topic is used).</p>
+ * <p><b>Error handling policy: log once, skip, never retry.</b>
+ * Every failure — whether a malformed record surfaced as
+ * {@link DeserializationException} or a listener exception (DB error, NPE,
+ * downstream timeout, …) — is handled the same way: log one ERROR line with
+ * the record's topic/partition/offset/key and the root cause, commit the
+ * offset past it, and move on. No {@link FixedBackOff} retries, no DLT.</p>
  *
- * <p><b>Poison-pill handling:</b> both consumer factories wrap their key/value
- * deserializers in {@link ErrorHandlingDeserializer} so malformed records
- * surface as {@link DeserializationException} to the listener container
- * instead of throwing inside {@code poll()} and blocking the partition.
- * {@code DeserializationException} is registered as non-retryable on the
- * {@link DefaultErrorHandler}, so poison pills get <b>zero retries</b> and
- * <b>zero backoff</b>: on the first failure the record is logged once and
- * the offset is committed past it. Retrying a poison pill is pointless —
- * the same bytes will fail the same way every time — and retrying inside
- * {@code poll()} is what produced the original "consumer stuck retrying
- * the same malformed record" loop this config is designed to prevent.
- * (The 500 ms × 3 {@link FixedBackOff} still applies to real listener
- * errors: DB timeouts, downstream failures, etc.)</p>
+ * <p>Both consumer factories wrap their key/value deserializers in
+ * {@link ErrorHandlingDeserializer} so deserialization failures surface as
+ * records the listener container can handle, instead of throwing inside
+ * {@code KafkaConsumer.poll()} and stalling the partition.</p>
  */
 @Slf4j
 @Configuration
@@ -123,7 +116,7 @@ public class KafkaConfig {
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory);
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL_IMMEDIATE);
-        factory.setCommonErrorHandler(poisonPillAwareErrorHandler());
+        factory.setCommonErrorHandler(logOnceAndSkipErrorHandler());
         return factory;
     }
 
@@ -153,7 +146,7 @@ public class KafkaConfig {
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(notificationConsumerFactory);
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL_IMMEDIATE);
-        factory.setCommonErrorHandler(poisonPillAwareErrorHandler());
+        factory.setCommonErrorHandler(logOnceAndSkipErrorHandler());
         return factory;
     }
 
@@ -170,22 +163,20 @@ public class KafkaConfig {
     }
 
     /**
-     * {@link DefaultErrorHandler} that treats {@link DeserializationException}
-     * as non-retryable: first failure → straight to the recoverer → offset
-     * commits → move on. No backoff is applied and no retry is attempted for
-     * poison pills. The {@link FixedBackOff}{@code (500ms, 3)} below only
-     * applies to exceptions thrown by the listener itself (e.g. DB errors).
+     * {@link DefaultErrorHandler} configured for zero retries on <b>every</b>
+     * exception type. The {@code FixedBackOff(0, 0)} means: interval 0 ms,
+     * max attempts 0 — on the first failure, control goes straight to the
+     * recoverer, which logs one ERROR line and lets the container commit
+     * past the record. Applies equally to {@link DeserializationException}
+     * (poison pills) and to anything the listener itself throws
+     * (DB errors, NPE, downstream timeouts, …).
      */
-    private static DefaultErrorHandler poisonPillAwareErrorHandler() {
-        DefaultErrorHandler handler = new DefaultErrorHandler(
+    private static DefaultErrorHandler logOnceAndSkipErrorHandler() {
+        return new DefaultErrorHandler(
                 (record, exception) -> log.error(
-                        "Skipping poison-pill Kafka record (no retries): topic={} partition={} offset={} key={} cause={}",
+                        "Skipping un-processable Kafka record (no retries): topic={} partition={} offset={} key={} cause={}",
                         record.topic(), record.partition(), record.offset(), record.key(),
                         exception.getMessage(), exception),
-                new FixedBackOff(500L, 3L));
-        // Zero retries for deserialization failures — skip immediately on the
-        // first occurrence; never re-poll the same bad bytes.
-        handler.addNotRetryableExceptions(DeserializationException.class);
-        return handler;
+                new FixedBackOff(0L, 0L));
     }
 }
