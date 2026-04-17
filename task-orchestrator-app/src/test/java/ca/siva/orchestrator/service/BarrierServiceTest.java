@@ -61,6 +61,25 @@ class BarrierServiceTest {
     }
 
     @Test
+    void initiateFlow_publishesLifecycleInitialBeforeTaskExecute() {
+        // Contract: downstream consumers must see flow.lifecycle INITIAL BEFORE
+        // any task.execute command for that flow. Post-commit hooks run in
+        // registration order, so initiateFlow(...) must register the lifecycle
+        // hook before seedAndPublishBatch(...) registers the task.execute hooks.
+        var dag = dagWithBatches(2);
+        when(dagRegistry.find("TestDAG")).thenReturn(Optional.of(dag));
+        when(repo.existsById(any())).thenReturn(false);
+        when(taskCommandFactory.buildTaskExecute(anyString(), anyString(), any(), any(), any(), any()))
+                .thenReturn(Optional.of(new TaskCommand()));
+
+        service.initiateFlow("corr-1", "TestDAG", ProcessFlow.builder().id("flow-1").build());
+
+        var inOrder = inOrder(taskEventsPublisher, publisher);
+        inOrder.verify(taskEventsPublisher).publishInitiated("corr-1", "TestDAG");
+        inOrder.verify(publisher, times(2)).publish(any());
+    }
+
+    @Test
     void initiateFlow_alreadySeeded_skips() {
         when(dagRegistry.find("TestDAG")).thenReturn(Optional.of(dagWithBatches(2)));
         when(repo.existsById(any())).thenReturn(true);

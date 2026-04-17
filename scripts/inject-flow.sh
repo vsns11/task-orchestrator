@@ -5,13 +5,17 @@
 #
 # No mocks required. Only the orchestrator app + Kafka + Postgres.
 #
-# NOTE: this script does NOT touch Kafka topics. Clearing topics while
-# the Spring consumer is subscribed breaks the consumer. If you need to
-# wipe state between runs, stop the app first and run:
+# FRESH IDs PER RUN: every scenario run mints a brand-new UUID and
+# rewrites .correlationId + .eventId (and nested .inputs.processFlow.id)
+# in-memory before publishing. Nothing on disk is modified. This means
+# you can run this script as many times as you like — back-to-back,
+# without stopping the app, without clearing topics — and each run
+# produces a fresh batch_barrier row, fresh task_execution rows, and
+# can never collide with prior state.
 #
+# So you normally do NOT need to wipe topics. If you still want a
+# full reset (stop app → wipe topics → restart app), use:
 #       ./scripts/pre-clear.sh
-#
-# then start the app again, then run this script.
 #
 # Usage:
 #   ./inject-flow.sh                   # default: passwordPushV2 (ASYNC)
@@ -92,17 +96,51 @@ need jq
 need docker
 need "$PRODUCER"
 
-pub() {
-  local file="$1"
-  [[ -f "$file" ]] || { echo "file not found: $file"; exit 1; }
-  local cid
-  cid=$(jq -r '.correlationId' "$file")
-  echo ">> $TOPIC  key=$cid  file=$(basename "$file")"
+# Cross-platform UUIDv4 generator. Tries, in order:
+#   1. uuidgen              (macOS, util-linux, Git Bash w/ coreutils)
+#   2. /proc/sys/kernel/random/uuid   (Linux containers)
+#   3. /dev/urandom + manual formatting (pure-bash fallback)
+gen_uuid() {
+  if command -v uuidgen >/dev/null 2>&1; then
+    uuidgen | tr '[:upper:]' '[:lower:]'
+  elif [[ -r /proc/sys/kernel/random/uuid ]]; then
+    cat /proc/sys/kernel/random/uuid
+  else
+    local hex
+    hex=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
+    printf '%s-%s-4%s-%x%s-%s\n' \
+      "${hex:0:8}" "${hex:8:4}" "${hex:13:3}" \
+      $(( (0x${hex:16:2} & 0x3f) | 0x80 )) "${hex:18:2}" \
+      "${hex:20:12}"
+  fi
+}
 
-  # Compact JSON to a single line, prepend the key and separator, pipe
-  # to Kafka's console producer. --property parse.key=true tells the
-  # producer to split each line on KEY_SEP into key+value.
-  printf '%s%s%s\n' "$cid" "$KEY_SEP" "$(jq -c . "$file")" \
+# Publish one payload file to task.command with the given correlationId.
+# The file on disk is NEVER modified — jq rewrites these fields in-memory:
+#   .correlationId        → $cid     (so the orchestrator groups events by this)
+#   .eventId              → fresh uuid (so idempotency checks can't collide)
+#   .inputs.processFlow.id → $cid     (only on the initiated event; the flow's own id)
+pub() {
+  local file="$1" cid="$2"
+  [[ -f "$file" ]] || { echo "file not found: $file"; exit 1; }
+  [[ -n "$cid"  ]] || { echo "pub(): missing cid argument"; exit 1; }
+  local eid
+  eid=$(gen_uuid)
+  echo ">> $TOPIC  key=$cid  eventId=$eid  file=$(basename "$file")"
+
+  local payload
+  payload=$(jq -c \
+              --arg cid "$cid" --arg eid "$eid" \
+              '.correlationId = $cid
+               | .eventId = $eid
+               | (if (.inputs?.processFlow?.id != null)
+                    then .inputs.processFlow.id = $cid
+                    else . end)' \
+              "$file")
+
+  # Compact JSON → one line, prepend the key and separator, pipe to Kafka's
+  # console producer. --property parse.key=true splits on KEY_SEP into key+value.
+  printf '%s%s%s\n' "$cid" "$KEY_SEP" "$payload" \
     | MSYS_NO_PATHCONV=1 "$PRODUCER" \
         --bootstrap-server "$BROKER" \
         --topic "$TOPIC" \
@@ -153,23 +191,29 @@ verify() {
 }
 
 # ---------- scenario runners ----------
+#
+# Each runner mints ONE fresh correlationId (via gen_uuid) and uses it for
+# every event in the scenario, then exports it as LAST_CID so the dispatcher
+# can run a final verify() without re-reading the sample files.
 
 run_async() {
   local dir="$SAMPLES/$1"
   [[ -d "$dir" ]] || { echo "scenario dir not found: $dir"; exit 1; }
   local cid
-  cid=$(jq -r '.correlationId' "$dir/02_processflow_initiated.json")
+  cid=$(gen_uuid)
+  LAST_CID="$cid"
+  echo "=== Fresh correlationId for this run: $cid ==="
 
-  pub "$dir/02_processflow_initiated.json"   # START → barrier OPEN, flow.lifecycle INITIAL
-  pub "$dir/05_task_event_waiting.json"      # WAITING → task_execution WAITING
+  pub "$dir/02_processflow_initiated.json" "$cid"   # START → barrier OPEN, flow.lifecycle INITIAL
+  pub "$dir/05_task_event_waiting.json"    "$cid"   # WAITING → task_execution WAITING
 
   inspect_pause "$cid" "WAITING" "signal"
 
-  pub "$dir/07_task_signal.json"             # SIGNAL → logged only
+  pub "$dir/07_task_signal.json"           "$cid"   # SIGNAL → logged only
 
   inspect_pause "$cid" "after signal" "COMPLETED"
 
-  pub "$dir/08_task_event_completed.json"    # COMPLETED → barrier CLOSED, flow.lifecycle COMPLETED
+  pub "$dir/08_task_event_completed.json"  "$cid"   # COMPLETED → barrier CLOSED, flow.lifecycle COMPLETED
 }
 
 inspect_pause() {
@@ -193,8 +237,12 @@ inspect_pause() {
 run_sync() {
   local dir="$SAMPLES/$1"
   [[ -d "$dir" ]] || { echo "scenario dir not found: $dir"; exit 1; }
-  pub "$dir/02_processflow_initiated.json"
-  pub "$dir/05_task_event_completed.json"
+  local cid
+  cid=$(gen_uuid)
+  LAST_CID="$cid"
+  echo "=== Fresh correlationId for this run: $cid ==="
+  pub "$dir/02_processflow_initiated.json" "$cid"
+  pub "$dir/05_task_event_completed.json"  "$cid"
 }
 
 # ---------- dispatcher ----------
@@ -242,13 +290,15 @@ case "$ACTION" in
     ;;
   miscellaneous)
     run_sync miscellaneous
-    cid=$(jq -r '.correlationId' "$SAMPLES/miscellaneous/02_processflow_initiated.json")
-    sleep 1; verify "$cid"
+    sleep 1; verify "$LAST_CID"
+    echo ""
+    echo "Run's correlationId was: $LAST_CID"
     ;;
   passwordPushV2|passwordResetV2)
     run_async "$ACTION"
-    cid=$(jq -r '.correlationId' "$SAMPLES/$ACTION/02_processflow_initiated.json")
-    sleep 1; verify "$cid"
+    sleep 1; verify "$LAST_CID"
+    echo ""
+    echo "Run's correlationId was: $LAST_CID"
     ;;
   help)
     cat <<EOF
@@ -266,22 +316,27 @@ Flags (can appear before OR after the action):
   -p, --pause <seconds>     override INSPECT_PAUSE for this run (e.g. -p 10)
   -h, --help                show this help
 
-Clean-slate runs:
-  This script does NOT delete/recreate Kafka topics — doing that while
-  the Spring consumer is subscribed breaks it. To start from a fully
-  clean state:
+Fresh correlationId on every run:
+  The script mints a new UUID per scenario run and rewrites
+  .correlationId / .eventId / .inputs.processFlow.id in memory before
+  publishing. Sample files on disk are never modified. You can run this
+  script back-to-back with the app running — each run produces a fresh
+  batch_barrier row and fresh task_execution rows. No need to clear
+  topics between runs.
+
+Full wipe (topics + DB) — only needed if you really want a clean broker:
     1. Stop the orchestrator app
-    2. ./scripts/pre-clear.sh        # wipes topics + DB
+    2. ./scripts/pre-clear.sh
     3. Start the orchestrator app
-    4. $0                            # ingest events
+    4. $0
 
 Examples:
-  $0                                     # passwordPushV2 with 30s pauses
+  $0                                     # passwordPushV2 with 30s pauses, fresh cid
   $0 passwordPushV2 -p 10                # pause 10 seconds
   $0 -p 0 passwordResetV2                # no pauses (fastest)
   $0 miscellaneous                       # SYNC (pause ignored — no WAITING step)
   $0 reset                               # truncate tables only (app can stay running)
-  $0 verify 11111111-aaaa-4bbb-8ccc-000000000001
+  $0 verify <correlationId>              # inspect a specific run's state
 
 Env overrides:
   BROKER         (current: $BROKER)

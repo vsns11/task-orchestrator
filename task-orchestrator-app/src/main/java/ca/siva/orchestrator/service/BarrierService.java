@@ -104,8 +104,16 @@ public class BarrierService {
             return;
         }
 
-        seedAndPublishBatch(processFlowId, dag, firstBatch.get(), processFlow);
+        // Register the flow.lifecycle INITIAL hook FIRST so it fires before
+        // any task.execute commands. Post-commit synchronizations run in the
+        // order they were registered; seedAndPublishBatch(...) internally
+        // registers task.execute publish hooks via publishAfterCommit(...),
+        // so if we call it before registering the lifecycle hook the
+        // task.execute commands would go out ahead of the INITIAL lifecycle
+        // event — breaking the contract that downstream consumers see a
+        // flow started notification before any of its task commands.
         runAfterCommit(() -> taskCommandsPublisher.publishInitiated(processFlowId, dagKey));
+        seedAndPublishBatch(processFlowId, dag, firstBatch.get(), processFlow);
     }
 
     /**
