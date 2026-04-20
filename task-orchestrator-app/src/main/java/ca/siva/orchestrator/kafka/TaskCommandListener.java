@@ -32,8 +32,8 @@ public class TaskCommandListener {
             orchestrator.handle(taskCommand);
         } catch (Exception e) {
             // Log and move on — never re-throw, never block the consumer
-            log.error("Error handling envelope eventId={}: {}",
-                    taskCommand != null ? taskCommand.getEventId() : "null", e.getMessage(), e);
+            log.error("Error handling envelope eventId={} exception={}",
+                    taskCommand != null ? taskCommand.getEventId() : "null", e.toString(), e);
         } finally {
             // Always ack so the consumer continues to the next message
             ack.acknowledge();

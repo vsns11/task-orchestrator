@@ -61,7 +61,7 @@ class TaskOrchestratorE2EIT extends TestcontainersConfig {
         // Step 2: Wait for both barrier rows (batch 0 + batch 1) to reach CLOSED
         await().atMost(ofSeconds(30)).untilAsserted(() -> {
             List<BatchBarrier> all = barrierRepo.findAll().stream()
-                    .filter(b -> processFlowId.equals(b.getId().getProcessFlowId()))
+                    .filter(b -> processFlowId.equals(b.getId().getCorrelationId()))
                     .toList();
             assertThat(all)
                     .as("Expected 2 barrier rows (batch 0 + batch 1)")
@@ -73,7 +73,7 @@ class TaskOrchestratorE2EIT extends TestcontainersConfig {
 
         // Step 3: Verify 3 task executions (2 in batch 0 + 1 in batch 1)
         long taskCount = taskRepo.findAll().stream()
-                .filter(t -> processFlowId.equals(t.getId().getProcessFlowId()))
+                .filter(t -> processFlowId.equals(t.getId().getCorrelationId()))
                 .count();
         assertThat(taskCount)
                 .as("Expected 3 tasks: a1 (ASYNC), a2 (SYNC), a3 (SYNC)")

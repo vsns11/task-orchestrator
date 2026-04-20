@@ -28,3 +28,8 @@ spring:
     locations: classpath:db/migration
     baseline-on-migrate: true
     baseline-version: 1
+
+# Pamconsumer-owned config — only active under local-dev. The orchestrator
+# itself never reads this; it is consumed by the mock-pamconsumer module.
+pamconsumer:
+  notification-topic: notification.management

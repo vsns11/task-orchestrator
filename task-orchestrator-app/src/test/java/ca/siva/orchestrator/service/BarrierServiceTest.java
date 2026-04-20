@@ -30,6 +30,7 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyShort;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
@@ -50,7 +51,7 @@ class BarrierServiceTest {
     void initiateFlow_seedsBarrierAndPublishesCommands() {
         var dag = dagWithBatches(2);
         when(dagRegistry.find("TestDAG")).thenReturn(Optional.of(dag));
-        when(repo.existsById(any())).thenReturn(false);
+        when(repo.existsByCorrelationIdAndBatchIndex(anyString(), anyShort())).thenReturn(false);
         when(taskCommandFactory.buildTaskExecute(anyString(), anyString(), any(), any(), any(), any()))
                 .thenReturn(Optional.of(new TaskCommand()));
 
@@ -68,7 +69,7 @@ class BarrierServiceTest {
         // hook before seedAndPublishBatch(...) registers the task.execute hooks.
         var dag = dagWithBatches(2);
         when(dagRegistry.find("TestDAG")).thenReturn(Optional.of(dag));
-        when(repo.existsById(any())).thenReturn(false);
+        when(repo.existsByCorrelationIdAndBatchIndex(anyString(), anyShort())).thenReturn(false);
         when(taskCommandFactory.buildTaskExecute(anyString(), anyString(), any(), any(), any(), any()))
                 .thenReturn(Optional.of(new TaskCommand()));
 
@@ -82,7 +83,7 @@ class BarrierServiceTest {
     @Test
     void initiateFlow_alreadySeeded_skips() {
         when(dagRegistry.find("TestDAG")).thenReturn(Optional.of(dagWithBatches(2)));
-        when(repo.existsById(any())).thenReturn(true);
+        when(repo.existsByCorrelationIdAndBatchIndex(anyString(), anyShort())).thenReturn(true);
 
         service.initiateFlow("corr-1", "TestDAG", ProcessFlow.builder().build());
 
@@ -100,7 +101,7 @@ class BarrierServiceTest {
     @Test
     void applyTaskEvent_completed_closesWhenPendingZero() {
         var barrier = barrierWithTotal(1, 0);
-        when(repo.findById(any(BatchBarrierId.class))).thenReturn(Optional.of(barrier));
+        when(repo.findByCorrelationIdAndBatchIndex(anyString(), anyShort())).thenReturn(Optional.of(barrier));
         // Only 1 batch in DAG — after closing batch 0, flow completes
         when(dagRegistry.find("TestDAG")).thenReturn(Optional.of(dagWithBatches(1)));
 
@@ -114,7 +115,7 @@ class BarrierServiceTest {
     @Test
     void applyTaskEvent_completed_doesNotCloseWhenPendingRemains() {
         var barrier = barrierWithTotal(2, 0);
-        when(repo.findById(any(BatchBarrierId.class))).thenReturn(Optional.of(barrier));
+        when(repo.findByCorrelationIdAndBatchIndex(anyString(), anyShort())).thenReturn(Optional.of(barrier));
 
         service.applyTaskEvent(buildTaskCommand(TaskStatus.COMPLETED, 0));
 
@@ -126,7 +127,7 @@ class BarrierServiceTest {
     void applyTaskEvent_completed_ignoredWhenBarrierAlreadyClosed() {
         var barrier = barrierWithTotal(1, 1);
         barrier.close(); // already CLOSED
-        when(repo.findById(any(BatchBarrierId.class))).thenReturn(Optional.of(barrier));
+        when(repo.findByCorrelationIdAndBatchIndex(anyString(), anyShort())).thenReturn(Optional.of(barrier));
 
         service.applyTaskEvent(buildTaskCommand(TaskStatus.COMPLETED, 0));
 
@@ -137,7 +138,7 @@ class BarrierServiceTest {
 
     @Test
     void applyTaskEvent_completed_ignoredWhenBarrierNotFound() {
-        when(repo.findById(any(BatchBarrierId.class))).thenReturn(Optional.empty());
+        when(repo.findByCorrelationIdAndBatchIndex(anyString(), anyShort())).thenReturn(Optional.empty());
         service.applyTaskEvent(buildTaskCommand(TaskStatus.COMPLETED, 0));
         verify(repo, never()).save(any());
     }
@@ -145,7 +146,7 @@ class BarrierServiceTest {
     @Test
     void applyTaskEvent_failed_nonRetryable_failsBarrier() {
         var barrier = barrierWithTotal(2, 0);
-        when(repo.findById(any(BatchBarrierId.class))).thenReturn(Optional.of(barrier));
+        when(repo.findByCorrelationIdAndBatchIndex(anyString(), anyShort())).thenReturn(Optional.of(barrier));
 
         var taskCommand = buildTaskCommand(TaskStatus.FAILED, 0);
         taskCommand.setError(TaskCommand.ErrorInfo.builder().retryable(false).build());
@@ -158,7 +159,7 @@ class BarrierServiceTest {
     @Test
     void applyTaskEvent_failed_retryable_doesNotFailBarrier() {
         var barrier = barrierWithTotal(2, 0);
-        when(repo.findById(any(BatchBarrierId.class))).thenReturn(Optional.of(barrier));
+        when(repo.findByCorrelationIdAndBatchIndex(anyString(), anyShort())).thenReturn(Optional.of(barrier));
 
         var taskCommand = buildTaskCommand(TaskStatus.FAILED, 0);
         taskCommand.setError(TaskCommand.ErrorInfo.builder().retryable(true).build());
@@ -251,16 +252,16 @@ class BarrierServiceTest {
     }
 
     // =================================================================
-    //  ActionResponse validation — BarrierService.validateActionResponse
-    //  rejects COMPLETED task.events whose embedded business status
-    //  indicates a failure, even though the envelope-level status is
-    //  COMPLETED. These tests lock that contract in place.
+    //  Kickout — BarrierService rejects COMPLETED task.events whose
+    //  embedded business status indicates a failure (per-action) AND
+    //  re-scans the batch for failed rows before promoting (per-batch).
+    //  These tests lock that contract in place.
     // =================================================================
 
     @Test
-    void applyTaskEvent_completed_rejectsWhenTaskStatusCodeNotCompleted() {
+    void applyTaskEvent_completed_kicksOutWhenTaskStatusCodeNotCompleted() {
         var barrier = barrierWithTotal(1, 0);
-        when(repo.findById(any(BatchBarrierId.class))).thenReturn(Optional.of(barrier));
+        when(repo.findByCorrelationIdAndBatchIndex(anyString(), anyShort())).thenReturn(Optional.of(barrier));
 
         var taskCommand = buildTaskCommand(TaskStatus.COMPLETED, 0);
         // Task-runner reported COMPLETED on the envelope but the embedded
@@ -274,9 +275,9 @@ class BarrierServiceTest {
     }
 
     @Test
-    void applyTaskEvent_completed_rejectsWhenStatusCharacteristicNotPass() {
+    void applyTaskEvent_completed_kicksOutWhenStatusCharacteristicNotPass() {
         var barrier = barrierWithTotal(1, 0);
-        when(repo.findById(any(BatchBarrierId.class))).thenReturn(Optional.of(barrier));
+        when(repo.findByCorrelationIdAndBatchIndex(anyString(), anyShort())).thenReturn(Optional.of(barrier));
 
         var taskCommand = buildTaskCommand(TaskStatus.COMPLETED, 0);
         // Overwrite the happy-path taskFlowResponse with a status=fail
@@ -298,12 +299,12 @@ class BarrierServiceTest {
 
     @Test
     void applyTaskEvent_completed_acceptsWhenTaskFlowResponseMissing() {
-        // validateActionResponse returns "no rejection" when the
-        // taskFlowResponse is absent — the envelope-level COMPLETED is
-        // trusted. The PATCH relatedEntity is skipped (no href to send)
-        // but the barrier still advances.
+        // detectKickout returns "no kickout" when the taskFlowResponse is
+        // absent — the envelope-level COMPLETED is trusted. The PATCH
+        // relatedEntity is skipped (no href to send) but the barrier still
+        // advances.
         var barrier = barrierWithTotal(1, 0);
-        when(repo.findById(any(BatchBarrierId.class))).thenReturn(Optional.of(barrier));
+        when(repo.findByCorrelationIdAndBatchIndex(anyString(), anyShort())).thenReturn(Optional.of(barrier));
         when(dagRegistry.find("TestDAG")).thenReturn(Optional.of(dagWithBatches(1)));
 
         var taskCommand = buildTaskCommand(TaskStatus.COMPLETED, 0);
@@ -312,5 +313,33 @@ class BarrierServiceTest {
 
         assertThat(barrier.getStatus()).isEqualTo(BarrierStatus.CLOSED);
         assertThat(barrier.getTaskCompleted()).isEqualTo(1);
+    }
+
+    @Test
+    void promoteNextBatch_kicksOutIfBatchHasFailedTaskExecution() {
+        // Per-batch defensive sweep: even when handleCompleted's per-action
+        // check passes, the batch-wide scan in promoteNextBatch catches any
+        // TaskExecution row that landed FAILED — and kicks out the flow
+        // instead of seeding the next batch.
+        var barrier = barrierWithTotal(1, 0);
+        when(repo.findByCorrelationIdAndBatchIndex(anyString(), anyShort())).thenReturn(Optional.of(barrier));
+        // dagRegistry is NOT stubbed here — the per-batch kickout sweep returns
+        // before DAG lookup, so stubbing would be dead code (lenient or removed).
+
+        var failedExec = new ca.siva.orchestrator.entity.TaskExecution();
+        failedExec.setId(new ca.siva.orchestrator.entity.TaskExecutionId("corr-1", "tf-1"));
+        failedExec.setActionName("badAction");
+        failedExec.setStatus(TaskStatus.FAILED);
+        when(taskExecutionRepo.findAllByCorrelationIdAndBatchIndex(eq("corr-1"), eq((short) 0)))
+                .thenReturn(List.of(failedExec));
+
+        service.applyTaskEvent(buildTaskCommand(TaskStatus.COMPLETED, 0));
+
+        // Barrier batch 0 still closed (per-action path was clean), but flow
+        // is kicked out — processFlow PATCHed failed, no next batch seeded.
+        verify(tmf701).patchProcessFlowState(anyString(), eq("failed"));
+        verify(taskEventsPublisher).publishFailed(anyString(), anyString());
+        verify(taskCommandFactory, never())
+                .buildTaskExecute(anyString(), anyString(), any(), any(), any(), any());
     }
 }

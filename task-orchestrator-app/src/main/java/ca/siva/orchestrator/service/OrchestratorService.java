@@ -53,7 +53,7 @@ public class OrchestratorService {
             return;
         }
 
-        log.info("HANDLE messageName={} source={} corrId={} eventId={}",
+        log.info("Handle messageName={} source={} corrId={} eventId={}",
                 taskCommand.getMessageName(), taskCommand.getSource(),
                 taskCommand.getCorrelationId(), taskCommand.getEventId());
 
@@ -79,15 +79,15 @@ public class OrchestratorService {
         }
 
         ProcessFlow processFlow = taskCommand.getInputs().getProcessFlow();
-        String processFlowId = processFlow.getId();
+        String correlationId = processFlow.getId();
 
-        if (processFlowId == null) {
+        if (correlationId == null) {
             log.warn("processFlow.initiated inputs.processFlow has no id - eventId={}",
                     taskCommand.getEventId());
             return;
         }
 
-        barrier.initiateFlow(processFlowId, taskCommand.getDagKey(), processFlow);
+        barrier.initiateFlow(correlationId, taskCommand.getDagKey(), processFlow);
     }
 
     private void handleTaskEvent(TaskCommand taskCommand) {
@@ -100,8 +100,8 @@ public class OrchestratorService {
         try {
             taskExecution.upsert(taskCommand);
         } catch (RuntimeException e) {
-            log.error("task_execution upsert failed for eventId={} corrId={} — continuing to barrier update: {}",
-                    taskCommand.getEventId(), taskCommand.getCorrelationId(), e.getMessage(), e);
+            log.error("task_execution upsert failed for eventId={} corrId={} — continuing to barrier update: exception={}",
+                    taskCommand.getEventId(), taskCommand.getCorrelationId(), e.toString(), e);
         }
 
         // Step 2 — drive the barrier. Exceptions here propagate to
@@ -112,7 +112,7 @@ public class OrchestratorService {
     }
 
     private void handleTaskSignal(TaskCommand taskCommand) {
-        log.info("SIGNAL observed: action={} downstream={}",
+        log.info("Signal observed: action={} downstream={}",
                 Optional.ofNullable(taskCommand.getAction())
                         .map(TaskCommand.Action::getActionName).orElse(null),
                 Optional.ofNullable(taskCommand.getInputs())

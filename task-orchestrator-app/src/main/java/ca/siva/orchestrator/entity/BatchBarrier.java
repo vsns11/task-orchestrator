@@ -6,12 +6,12 @@ import jakarta.persistence.EmbeddedId;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
+import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
-import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
 import java.time.Instant;
@@ -25,6 +25,10 @@ import java.time.Instant;
  *
  * <p>Concurrency is guarded by JPA {@link Version @Version} optimistic locking
  * combined with {@code @Retryable} at the service layer.</p>
+ *
+ * <p>The table is range-partitioned by {@code created_at} (see
+ * {@code V3__partition_by_created_at.sql}), so {@code createdAt} is part of
+ * the composite primary key in {@link BatchBarrierId}.</p>
  */
 @Entity
 @Table(name = "batch_barrier")
@@ -58,16 +62,30 @@ public class BatchBarrier {
     @Column(name = "closed_at")
     private Instant closedAt;
 
-    @CreationTimestamp
-    @Column(name = "created_at", updatable = false)
-    private Instant createdAt;
-
     @UpdateTimestamp
     @Column(name = "updated_at")
     private Instant updatedAt;
 
     @Version
     private long version;
+
+    /**
+     * Ensures the partition key ({@code id.createdAt}) is populated before
+     * insert. Hibernate's @CreationTimestamp doesn't apply to @EmbeddedId
+     * fields, and the partition key must be non-null at insert time,
+     * otherwise the row can't be routed to any partition.
+     */
+    @PrePersist
+    void prePersist() {
+        if (id != null && id.getCreatedAt() == null) {
+            id.setCreatedAt(Instant.now());
+        }
+    }
+
+    /** Read-only accessor mirroring {@code id.createdAt} for callers that don't reach into the ID. */
+    public Instant getCreatedAt() {
+        return id == null ? null : id.getCreatedAt();
+    }
 
     // ---- domain methods ----
 

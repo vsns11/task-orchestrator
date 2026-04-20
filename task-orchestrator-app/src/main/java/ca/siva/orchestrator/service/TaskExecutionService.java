@@ -29,11 +29,15 @@ public class TaskExecutionService {
     /**
      * Creates or updates a task execution record from the given taskCommand.
      *
-     * <p>The composite key is (processFlowId, taskFlowId) where:
+     * <p>The flow-task coordinate is {@code (correlationId, taskFlowId)} where:
      * <ul>
-     *   <li>processFlowId = correlationId = the TMF-701 processFlow UUID</li>
+     *   <li>correlationId = the Kafka correlationId = the TMF-701 processFlow UUID</li>
      *   <li>taskFlowId = result.id = the TMF-701 taskFlow UUID from ActionResponse</li>
      * </ul>
+     * The table is date-partitioned, so lookups use the coordinate query
+     * (two-phase: today-partition first, cross-partition fallback) instead of
+     * {@code findById} — the partition column ({@code createdAt}) is not
+     * known when upserting from a Kafka event.</p>
      */
     @Transactional
     public void upsert(TaskCommand taskCommand) {
@@ -45,41 +49,40 @@ public class TaskExecutionService {
             return;
         }
 
-        TaskExecutionId id = new TaskExecutionId(
-                taskCommand.getCorrelationId(),
-                taskFlowId.get());
+        String correlationId = taskCommand.getCorrelationId();
+        String taskFlowIdValue = taskFlowId.get();
 
-        Optional<TaskExecution> existing = repo.findById(id);
-        TaskExecution te;
+        Optional<TaskExecution> existing = repo.findByCorrelationIdAndTaskFlowId(correlationId, taskFlowIdValue);
+        TaskExecution taskExecution;
         boolean isNew = existing.isEmpty();
         if (isNew) {
-            te = new TaskExecution();
-            te.setId(id);
+            taskExecution = new TaskExecution();
+            taskExecution.setId(new TaskExecutionId(correlationId, taskFlowIdValue));
         } else {
-            te = existing.get();
+            taskExecution = existing.get();
         }
 
-        te.setActionName(taskCommand.getAction().getActionName());
-        te.setActionCode(taskCommand.getAction().getActionCode());
-        te.setBatchIndex(taskCommand.getBatch().getIndex().shortValue());
-        te.setStatus(taskCommand.getStatus());
+        taskExecution.setActionName(taskCommand.getAction().getActionName());
+        taskExecution.setActionCode(taskCommand.getAction().getActionCode());
+        taskExecution.setBatchIndex(taskCommand.getBatch().getIndex().shortValue());
+        taskExecution.setStatus(taskCommand.getStatus());
 
         // Populate execution timing if present
-        Optional.ofNullable(taskCommand.getExecution()).ifPresent(ex -> {
-            te.setStartedAt(ex.getStartedAt());
-            te.setFinishedAt(ex.getFinishedAt());
-            Optional.ofNullable(ex.getDurationMs())
-                    .ifPresent(te::setDurationMs);
+        Optional.ofNullable(taskCommand.getExecution()).ifPresent(execution -> {
+            taskExecution.setStartedAt(execution.getStartedAt());
+            taskExecution.setFinishedAt(execution.getFinishedAt());
+            Optional.ofNullable(execution.getDurationMs())
+                    .ifPresent(taskExecution::setDurationMs);
         });
 
-        te.setResultJson(serialize(taskCommand.getResult()));
-        te.setErrorJson(taskCommand.getError() != null ? serialize(taskCommand.getError()) : null);
+        taskExecution.setResultJson(serialize(taskCommand.getResult()));
+        taskExecution.setErrorJson(taskCommand.getError() != null ? serialize(taskCommand.getError()) : null);
 
         // Only save for new entities. Existing entities are managed inside this @Transactional
         // method — Hibernate's dirty-checking flushes the UPDATE at commit automatically,
         // so calling save() here would be a redundant round trip.
         if (isNew) {
-            repo.save(te);
+            repo.save(taskExecution);
         }
     }
 
@@ -90,19 +93,19 @@ public class TaskExecutionService {
      * enforce it at the DB level (e.g. a column type cap) rather than silently
      * truncating here.
      */
-    private String serialize(Object o) {
-        if (o == null) return null;
+    private String serialize(Object payload) {
+        if (payload == null) return null;
         try {
-            return mapper.writeValueAsString(o);
+            return mapper.writeValueAsString(payload);
         } catch (JsonProcessingException e) {
             // Don't silently persist NULL — a downstream query reading
             // result_json can't distinguish "no result" from "serialization
             // failed". Store a tiny JSON marker so forensics have the failure
             // reason and the payload class visible in the row.
-            log.warn("Could not serialize {} — persisting error marker: {}",
-                    o.getClass().getSimpleName(), e.getMessage());
+            log.warn("Could not serialize {} — persisting error marker: exception={}",
+                    payload.getClass().getSimpleName(), e.toString(), e);
             return "{\"_serializationError\":\"" + escapeJson(e.getMessage())
-                    + "\",\"_class\":\"" + o.getClass().getName() + "\"}";
+                    + "\",\"_class\":\"" + payload.getClass().getName() + "\"}";
         }
     }
 

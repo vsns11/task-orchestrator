@@ -41,7 +41,7 @@ set -euo pipefail
 
 BROKER="${BROKER:-localhost:9092}"
 TOPIC="${TOPIC:-task.command}"
-SAMPLES="${SAMPLES:-task-orchestrator-app/src/main/resources/sample_payloads}"
+SAMPLES="${SAMPLES:-sample_payloads}"
 PG_USER="${PG_USER:-orchestrator}"
 PG_DB="${PG_DB:-orchestrator}"
 
@@ -180,14 +180,14 @@ reset_db() {
 verify() {
   ensure_pg_container
   local cid="${1:-}"
-  local where="WHERE process_flow_id = '${cid}'"
+  local where="WHERE correlation_id = '${cid}'"
   [[ -z "$cid" ]] && where=""
   echo "--- batch_barrier ---"
-  psql_cmd "SELECT process_flow_id, batch_index, task_total, task_completed, task_failed, status
-            FROM batch_barrier ${where} ORDER BY process_flow_id, batch_index;"
+  psql_cmd "SELECT correlation_id, batch_index, task_total, task_completed, task_failed, status
+            FROM batch_barrier ${where} ORDER BY correlation_id, batch_index;"
   echo "--- task_execution ---"
-  psql_cmd "SELECT process_flow_id, action_name, batch_index, status, downstream_id
-            FROM task_execution ${where} ORDER BY process_flow_id, batch_index, action_name;"
+  psql_cmd "SELECT correlation_id, action_name, batch_index, status, downstream_id
+            FROM task_execution ${where} ORDER BY correlation_id, batch_index, action_name;"
 }
 
 # ---------- scenario runners ----------
@@ -222,7 +222,7 @@ inspect_pause() {
   echo ""
   echo "------------------------------------------------------------------"
   echo " Inspection pause: ${INSPECT_PAUSE}s before publishing ${next}"
-  echo " Current state (${phase}) for processFlowId=${cid}:"
+  echo " Current state (${phase}) for correlationId=${cid}:"
   echo "------------------------------------------------------------------"
   verify "$cid"
   echo ""

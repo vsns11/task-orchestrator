@@ -70,7 +70,7 @@ public class ActionRegistry {
     private static final String STATE_KEPT           = "kept";
     private static final String MSG_KEEP_EXISTING    = "{} API returned empty — keeping existing {} entries";
     private static final String MSG_ALL_INVALID      = "{} API returned {} row(s) but all were invalid — keeping existing {} entries";
-    private static final String MSG_FETCH_FAILED     = "{} fetch failed from {} — keeping existing {} entries: {}";
+    private static final String MSG_FETCH_FAILED     = "{} fetch failed from {} — keeping existing {} entries, exception={}";
     private static final String UNKNOWN_DCX          = "UNKNOWN";
 
     private final ActionRegistryProperties props;
@@ -183,7 +183,7 @@ public class ActionRegistry {
             // expected List<ActionCodeEntry>). Either way the in-memory registry
             // is preserved per the "keep existing" contract.
             log.error(MSG_FETCH_FAILED,
-                    API_ACTION_CODES, baseUrl, mapActionNameToActionCode.size(), e.getMessage(), e);
+                    API_ACTION_CODES, baseUrl, mapActionNameToActionCode.size(), e.toString(), e);
             return false;
         }
     }
@@ -193,7 +193,7 @@ public class ActionRegistry {
             return loadDcxActionCodes(client);
         } catch (RuntimeException e) {
             log.error(MSG_FETCH_FAILED,
-                    API_DCX_ACTION_CODES, baseUrl, mapActionCodeToDcxActionCode.size(), e.getMessage(), e);
+                    API_DCX_ACTION_CODES, baseUrl, mapActionCodeToDcxActionCode.size(), e.toString(), e);
             return false;
         }
     }

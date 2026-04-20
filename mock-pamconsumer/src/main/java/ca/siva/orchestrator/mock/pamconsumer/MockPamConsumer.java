@@ -56,7 +56,7 @@ public class MockPamConsumer {
      * into {@link NotificationEvent} (NOT TaskCommand).
      */
     @KafkaListener(
-            topics = "${orchestrator.topics.notification-management}",
+            topics = "${pamconsumer.notification-topic}",
             groupId = "mock-pamconsumer",
             containerFactory = "notificationListenerContainerFactory"
     )

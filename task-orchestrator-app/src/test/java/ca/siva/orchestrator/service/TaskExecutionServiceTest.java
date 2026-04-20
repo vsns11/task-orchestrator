@@ -21,6 +21,7 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -32,7 +33,7 @@ class TaskExecutionServiceTest {
 
     @Test
     void upsert_newExecution_savesCorrectly() {
-        when(repo.findById(any(TaskExecutionId.class))).thenReturn(Optional.empty());
+        when(repo.findByCorrelationIdAndTaskFlowId(anyString(), anyString())).thenReturn(Optional.empty());
 
         var testCommand = buildTaskCommand();
         service.upsert(testCommand);
@@ -51,7 +52,7 @@ class TaskExecutionServiceTest {
         var existing = new TaskExecution();
         existing.setId(new TaskExecutionId("corr-1", "tf-1"));
         existing.setStatus(TaskStatus.IN_PROGRESS);
-        when(repo.findById(any())).thenReturn(Optional.of(existing));
+        when(repo.findByCorrelationIdAndTaskFlowId(anyString(), anyString())).thenReturn(Optional.of(existing));
 
         var testCommand = buildTaskCommand();
         service.upsert(testCommand);
@@ -75,7 +76,7 @@ class TaskExecutionServiceTest {
 
     @Test
     void upsert_withExecution_setsTimingFields() {
-        when(repo.findById(any())).thenReturn(Optional.empty());
+        when(repo.findByCorrelationIdAndTaskFlowId(anyString(), anyString())).thenReturn(Optional.empty());
 
         Instant now = Instant.now();
         var testCommand = buildTaskCommand();

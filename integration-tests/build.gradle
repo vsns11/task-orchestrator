@@ -27,11 +27,10 @@ dependencies {
     // Awaitility for async assertion
     testImplementation 'org.awaitility:awaitility'
 
-    // Runtime
+    // Runtime. byte-buddy is pulled in transitively by mockito-core — do not
+    // declare explicitly so versions track Mockito's expected range.
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
     testRuntimeOnly 'org.postgresql:postgresql'
     testRuntimeOnly 'org.flywaydb:flyway-core'
     testRuntimeOnly 'org.flywaydb:flyway-database-postgresql'
-    testImplementation "net.bytebuddy:byte-buddy:1.17.5"
-    testImplementation "net.bytebuddy:byte-buddy-agent:1.17.5"
 }

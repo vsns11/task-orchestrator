@@ -26,6 +26,19 @@ subprojects {
         mavenCentral()
     }
 
+    // Pin byte-buddy ahead of Mockito 5.11's transitive 1.14.x default.
+    // byte-buddy 1.14.x cannot parse JDK 22+ class files (toolchain at dev
+    // workstations varies, CI runs JDK 21+). Forcing resolution here keeps
+    // every test configuration consistent without per-module declarations.
+    configurations.configureEach {
+        resolutionStrategy.eachDependency { details ->
+            if (details.requested.group == 'net.bytebuddy') {
+                details.useVersion(rootProject.property('byteBuddyVersion'))
+                details.because('Mockito 5.11 ships byte-buddy 1.14.x which cannot parse JDK 22+ class files')
+            }
+        }
+    }
+
     // Lombok available in all modules
     dependencies {
         compileOnly "org.projectlombok:lombok:${rootProject.property('lombokVersion')}"

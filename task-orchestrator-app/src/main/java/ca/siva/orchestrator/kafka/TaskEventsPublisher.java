@@ -41,7 +41,7 @@ public class TaskEventsPublisher {
         lifecycle.setDagKey(dagKey);
         lifecycle.setStatus(TaskStatus.INITIAL);
         publisher.publish(lifecycle);
-        log.info("LIFECYCLE INITIATED for flow={} dagKey={}", processFlowId, dagKey);
+        log.info("Lifecycle initiated for flow={} dagKey={}", processFlowId, dagKey);
     }
 
     /**
@@ -54,7 +54,7 @@ public class TaskEventsPublisher {
                 MessageType.EVENT, Sources.TASK_ORCHESTRATOR);
         lifecycle.setStatus(TaskStatus.COMPLETED);
         publisher.publish(lifecycle);
-        log.info("LIFECYCLE COMPLETED for flow={}", processFlowId);
+        log.info("Lifecycle completed for flow={}", processFlowId);
     }
 
     /**
@@ -71,6 +71,6 @@ public class TaskEventsPublisher {
                 .retryable(false)
                 .build());
         publisher.publish(lifecycle);
-        log.info("LIFECYCLE FAILED for flow={} reason={}", processFlowId, reason);
+        log.info("Lifecycle failed for flow={} reason={}", processFlowId, reason);
     }
 }

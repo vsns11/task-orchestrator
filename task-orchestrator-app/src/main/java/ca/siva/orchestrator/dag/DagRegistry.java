@@ -44,7 +44,8 @@ public class DagRegistry {
             PathMatchingResourcePatternResolver resolver = new PathMatchingResourcePatternResolver();
             files = resolver.getResources(props.location() + "*.yml");
         } catch (IOException e) {
-            log.error("Could not enumerate DAG YAML files at {}: {}", props.location(), e.getMessage(), e);
+            log.error("Could not enumerate DAG YAML files at {} exception={}",
+                    props.location(), e.toString(), e);
             return;
         }
 
@@ -64,7 +65,7 @@ public class DagRegistry {
                 // RuntimeException covers Jackson parse errors (JsonMappingException,
                 // JsonParseException) which extend IOException but we catch broadly
                 // so a single malformed file never aborts the whole load.
-                log.error("Failed to parse DAG file {}: {}", filename, e.getMessage(), e);
+                log.error("Failed to parse DAG file {} exception={}", filename, e.toString(), e);
             }
         }
 

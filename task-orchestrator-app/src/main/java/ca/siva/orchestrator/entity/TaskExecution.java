@@ -6,12 +6,12 @@ import jakarta.persistence.EmbeddedId;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Entity;
+import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
-import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
 import java.time.Instant;
@@ -20,7 +20,8 @@ import java.time.Instant;
  * Per-task audit trail recording the lifecycle of each action execution.
  *
  * <p>Each row represents a task execution (identified by the composite
- * key of processFlowId and taskFlowId).</p>
+ * key of correlationId, taskFlowId, and createdAt — the last being the
+ * partition key required by the range-partitioned table).</p>
  */
 @Entity
 @Table(name = "task_execution")
@@ -66,14 +67,26 @@ public class TaskExecution {
     @Column(name = "error_json", columnDefinition = "TEXT")
     private String errorJson;
 
-    @CreationTimestamp
-    @Column(name = "created_at", updatable = false)
-    private Instant createdAt;
-
     @UpdateTimestamp
     @Column(name = "updated_at")
     private Instant updatedAt;
 
     @Version
     private long version;
+
+    /**
+     * Ensures the partition key ({@code id.createdAt}) is populated before
+     * insert — same reason as {@link BatchBarrier#prePersist()}.
+     */
+    @PrePersist
+    void prePersist() {
+        if (id != null && id.getCreatedAt() == null) {
+            id.setCreatedAt(Instant.now());
+        }
+    }
+
+    /** Read-only accessor mirroring {@code id.createdAt} for convenience. */
+    public Instant getCreatedAt() {
+        return id == null ? null : id.getCreatedAt();
+    }
 }

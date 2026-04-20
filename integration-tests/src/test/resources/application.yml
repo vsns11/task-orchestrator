@@ -24,7 +24,6 @@ spring:
 orchestrator:
   topics:
     task-command: task.command
-    notification-management: notification.management
   dag:
     location: classpath:dag/
   tmf701:
@@ -34,8 +33,10 @@ orchestrator:
     base-url: http://localhost:8080/mock/actionregistry
     action-codes-path: /action-codes
     dcx-action-codes-path: /dcx-action-codes
-  mock:
-    enabled: true
+
+# Pamconsumer-owned config (mock-pamconsumer module) — NOT orchestrator's.
+pamconsumer:
+  notification-topic: notification.management
 
 server:
   port: 0

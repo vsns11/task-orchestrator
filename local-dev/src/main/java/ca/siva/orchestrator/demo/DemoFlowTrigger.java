@@ -1,6 +1,5 @@
 package ca.siva.orchestrator.demo;
 
-import ca.siva.orchestrator.config.TopicsProperties;
 import ca.siva.orchestrator.domain.MessageName;
 import ca.siva.orchestrator.domain.MessageType;
 import ca.siva.orchestrator.domain.Sources;
@@ -10,6 +9,7 @@ import ca.siva.orchestrator.entity.BatchBarrier;
 import ca.siva.orchestrator.entity.TaskExecution;
 import ca.siva.orchestrator.kafka.TaskCommandFactory;
 import ca.siva.orchestrator.kafka.TaskCommandPublisher;
+import ca.siva.orchestrator.mock.pamconsumer.PamconsumerProperties;
 import ca.siva.orchestrator.repository.BatchBarrierRepository;
 import ca.siva.orchestrator.repository.TaskExecutionRepository;
 import lombok.extern.slf4j.Slf4j;
@@ -48,7 +48,7 @@ public class DemoFlowTrigger {
     private final KafkaTemplate<String, Object> notificationKafka;
     private final TaskCommandPublisher          taskCommandPublisher;
     private final TaskCommandFactory            taskCommandFactory;
-    private final TopicsProperties              topics;
+    private final PamconsumerProperties         pamconsumerProps;
     private final BatchBarrierRepository        barrierRepo;
     private final TaskExecutionRepository       taskRepo;
 
@@ -56,13 +56,13 @@ public class DemoFlowTrigger {
             @Qualifier("notificationKafkaTemplate") KafkaTemplate<String, Object> notificationKafka,
             TaskCommandPublisher taskCommandPublisher,
             TaskCommandFactory taskCommandFactory,
-            TopicsProperties topics,
+            PamconsumerProperties pamconsumerProps,
             BatchBarrierRepository barrierRepo,
             TaskExecutionRepository taskRepo) {
         this.notificationKafka = notificationKafka;
         this.taskCommandPublisher = taskCommandPublisher;
         this.taskCommandFactory = taskCommandFactory;
-        this.topics = topics;
+        this.pamconsumerProps = pamconsumerProps;
         this.barrierRepo = barrierRepo;
         this.taskRepo = taskRepo;
     }
@@ -109,20 +109,21 @@ public class DemoFlowTrigger {
                 .processFlowSpecification(dagKey)
                 .build();
 
+        String notificationTopic = pamconsumerProps.notificationTopic();
         notificationKafka.send(MessageBuilder
                 .withPayload(processFlow)
-                .setHeader(KafkaHeaders.TOPIC, topics.notificationManagement())
+                .setHeader(KafkaHeaders.TOPIC, notificationTopic)
                 .setHeader(KafkaHeaders.KEY, processFlowId)
                 .build());
 
         log.info("DEMO: published processFlow to {} for processFlowId={}",
-                topics.notificationManagement(), processFlowId);
+                notificationTopic, processFlowId);
 
         return Map.of(
                 "processFlowId", processFlowId,
                 "dagKey", dagKey,
-                "publishedTo", topics.notificationManagement(),
-                "message", "processFlow published → notification.management → pamconsumer → orchestrator"
+                "publishedTo", notificationTopic,
+                "message", "processFlow published → " + notificationTopic + " → pamconsumer → orchestrator"
         );
     }
 

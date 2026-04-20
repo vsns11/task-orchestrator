@@ -43,14 +43,14 @@ public class TaskCommandPublisher {
                 .setHeader("schemaVersion", taskCommand.getSchemaVersion())
                 .build();
 
-        log.info("PUBLISH {} eventId={} corrId={} source={}",
+        log.info("Publish {} eventId={} corrId={} source={}",
                 messageName, eventId, key, taskCommand.getSource());
 
         CompletableFuture<?> future = kafka.send(kafkaMessage);
         future.whenComplete((result, ex) -> {
             if (ex != null) {
-                log.error("PUBLISH FAILED {} eventId={} corrId={}: {}",
-                        messageName, eventId, key, ex.getMessage(), ex);
+                log.error("Publish failed {} eventId={} corrId={} exception={}",
+                        messageName, eventId, key, ex.toString(), ex);
             }
         });
     }
