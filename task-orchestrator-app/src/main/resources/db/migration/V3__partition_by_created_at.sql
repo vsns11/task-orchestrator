@@ -90,8 +90,15 @@ CREATE INDEX idx_task_execution_batch      ON task_execution (correlation_id, ba
 
 -- ---------- 4) Extensions --------------------------------------------------
 -- pg_partman is conventionally installed into its own schema (not public).
+-- We create the schema here (rather than relying on the image's initdb.d
+-- script) so this migration is self-sufficient against any Postgres that
+-- has the pg_partman + pg_cron .so files available — whether it's our
+-- custom image, a stale pgdata volume that pre-dates the image change, a
+-- managed DB instance, or a Terraform-provisioned cluster.
+--
 -- CREATE EXTENSION ... SCHEMA partman is idempotent when the extension is
 -- already installed.
+CREATE SCHEMA IF NOT EXISTS partman;
 CREATE EXTENSION IF NOT EXISTS pg_partman SCHEMA partman;
 CREATE EXTENSION IF NOT EXISTS pg_cron;
 
@@ -105,34 +112,36 @@ CREATE EXTENSION IF NOT EXISTS pg_cron;
 --   p_premake      — how many future partitions to keep pre-created (14 days
 --                    of headroom — survives a weekend pg_cron outage).
 --
--- Wrapped in DO blocks that check part_config so re-running this migration
--- on a database where pg_partman already manages these tables is a no-op.
+-- Idempotency strategy:
+--   Step 1 above unconditionally dropped the parent tables (if they existed),
+--   which also drops all their child partitions. But partman.part_config is
+--   NOT linked by FK to the parent tables — stale rows survive. So we
+--   explicitly DELETE them here, then register parents unconditionally.
+--   That way a re-run (after e.g. flyway repair + flyway migrate) lands on a
+--   clean partman state instead of a half-registered one where the parents
+--   have no children and run_maintenance_proc errors with
+--   "Child table given does not exist".
+
+DELETE FROM partman.part_config
+ WHERE parent_table IN ('public.batch_barrier', 'public.task_execution');
 
 DO $$
 BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM partman.part_config WHERE parent_table = 'public.batch_barrier'
-    ) THEN
-        PERFORM partman.create_parent(
-            p_parent_table := 'public.batch_barrier',
-            p_control      := 'created_at',
-            p_type         := 'range',
-            p_interval     := '1 day',
-            p_premake      := 14
-        );
-    END IF;
+    PERFORM partman.create_parent(
+        p_parent_table := 'public.batch_barrier',
+        p_control      := 'created_at',
+        p_type         := 'range',
+        p_interval     := '1 day',
+        p_premake      := 14
+    );
 
-    IF NOT EXISTS (
-        SELECT 1 FROM partman.part_config WHERE parent_table = 'public.task_execution'
-    ) THEN
-        PERFORM partman.create_parent(
-            p_parent_table := 'public.task_execution',
-            p_control      := 'created_at',
-            p_type         := 'range',
-            p_interval     := '1 day',
-            p_premake      := 14
-        );
-    END IF;
+    PERFORM partman.create_parent(
+        p_parent_table := 'public.task_execution',
+        p_control      := 'created_at',
+        p_type         := 'range',
+        p_interval     := '1 day',
+        p_premake      := 14
+    );
 END;
 $$;
 
@@ -169,8 +178,21 @@ SELECT cron.schedule(
 );
 
 -- ---------- 8) First-run bootstrap ----------------------------------------
--- create_parent already seeded p_premake partitions, but we still call the
--- proc once so retention state is initialised and any drift between the
--- parent tables' initial partition and p_premake is reconciled immediately
--- rather than at 01:00 tomorrow.
-CALL partman.run_maintenance_proc();
+-- create_parent already seeded p_premake partitions, but we still run
+-- maintenance once so retention state is initialised and any drift between
+-- the parent tables' initial partition and p_premake is reconciled
+-- immediately rather than at 01:00 tomorrow.
+--
+-- pg_partman ships this work in two forms:
+--   * run_maintenance_proc() — PROCEDURE that COMMITs internally between
+--     batches (designed for long-running manual runs and for pg_cron, which
+--     runs each job in its own autonomous transaction).
+--   * run_maintenance()      — FUNCTION equivalent with no internal commits.
+--
+-- Flyway wraps each migration in a single transaction, so CALL on the
+-- procedure raises "invalid transaction termination" (SQLSTATE 2D000).
+-- We use the function form here because it is transaction-safe. The cron
+-- schedule in step 7 continues to use the procedure, which is correct
+-- because pg_cron starts a fresh transaction for each job invocation.
+SELECT partman.run_maintenance(p_parent_table := 'public.batch_barrier', p_analyze := false);
+SELECT partman.run_maintenance(p_parent_table := 'public.task_execution', p_analyze := false);
