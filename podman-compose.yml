@@ -20,20 +20,30 @@
 
 services:
   postgres:
-    image: docker.io/postgres:16-alpine
+    # Custom image = postgres:16 + pg_partman + pg_cron (see docker/postgres/
+    # Dockerfile). Required by V3__partition_by_created_at.sql which registers
+    # partitioned parents with pg_partman and schedules maintenance via pg_cron.
+    build: ./docker/postgres
+    image: localhost/orchestrator-postgres:16
     ports:
       - "5433:5432"
     environment:
       POSTGRES_DB: orchestrator
       POSTGRES_USER: orchestrator
       POSTGRES_PASSWORD: orchestrator
+    # shared_preload_libraries MUST be set before the server starts.
+    # cron.database_name tells pg_cron which database to install into.
+    command:
+      - "postgres"
+      - "-c"
+      - "shared_preload_libraries=pg_cron,pg_partman_bgw"
+      - "-c"
+      - "cron.database_name=orchestrator"
     volumes:
+      # Schema is owned by Flyway (V3). The image's own initdb.d/ scripts only
+      # create the `partman` schema so V3's CREATE EXTENSION lands in it.
+      # To re-seed: `podman compose down -v` then `up`.
       - pgdata:/var/lib/postgresql/data
-      # Postgres runs every *.sql in /docker-entrypoint-initdb.d ONCE, only
-      # when the data volume is empty (i.e. first boot). We reuse the same
-      # V1 migration that Flyway uses — one source of truth for the schema.
-      # To re-seed: `podman compose down -v` (drops the volume) then `up`.
-      - ./task-orchestrator-app/src/main/resources/db/migration/V1__init.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U orchestrator"]
       interval: 5s

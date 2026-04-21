@@ -1,0 +1,21 @@
+-- =============================================================================
+-- 00-extensions.sql
+-- Runs ONCE on first container boot (only when /var/lib/postgresql/data is
+-- empty). Prepares the DB so that Flyway's V3 migration can succeed:
+--
+--   * pg_partman must live in its own schema per upstream guidance. Creating
+--     the schema up front lets V3 run `CREATE EXTENSION pg_partman SCHEMA
+--     partman` idempotently — both on fresh installs and when pg_partman is
+--     already present.
+--   * pg_cron is a single-database extension: by default it reads
+--     `cron.database_name` from postgresql.conf to know where to install its
+--     catalog. We set that via the `command:` arg in docker-compose so it's
+--     in effect before the server boots.
+--
+-- We intentionally DO NOT run the CREATE EXTENSION statements here — V3 owns
+-- them, and keeping them there means the migration is self-contained and
+-- portable to environments where the schema was initialised differently
+-- (managed Postgres, Terraform-provisioned clusters, etc.).
+-- =============================================================================
+
+CREATE SCHEMA IF NOT EXISTS partman;
