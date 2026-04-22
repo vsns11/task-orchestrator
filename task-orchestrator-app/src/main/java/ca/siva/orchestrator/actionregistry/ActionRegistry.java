@@ -646,16 +646,21 @@ public class ActionRegistry {
 
     /**
      * Runs an HTTP call under the shared retry policy
-     * (see {@link AppConfig#httpCallRetryTemplate()}): 1 initial attempt +
-     * 3 retries, exponential backoff, retries on 5xx + transport errors + 408
-     * + 429. Transient 4xx responses are translated to
-     * {@link TransientClientError} so the retry policy picks them up.
+     * (see {@link AppConfig#httpCallRetryTemplate()}): 3 attempts total
+     * (1 initial + 2 retries), exponential backoff, retries on 5xx +
+     * transport errors + any status declared in
+     * {@code orchestrator.http.retryable-statuses}. Matching responses are
+     * translated to {@link TransientClientError} so the retry policy picks
+     * them up.
      */
     private <T> T executeWithRetry(String label, Supplier<T> call) {
         return httpCallRetryTemplate.execute(ctx -> {
             if (ctx.getRetryCount() > 0) {
-                log.warn("Action registry {} retry attempt {} after {}",
-                        label, ctx.getRetryCount() + 1,
+                // RetryContext.getRetryCount() = count of prior failures =
+                // retry number about to run (1, 2, 3). No +1 offset — the
+                // initial attempt is not a "retry".
+                log.warn("Action registry {} retry {} after {}",
+                        label, ctx.getRetryCount(),
                         ctx.getLastThrowable() == null ? "<no prior error>" : ctx.getLastThrowable().toString());
             }
             try {

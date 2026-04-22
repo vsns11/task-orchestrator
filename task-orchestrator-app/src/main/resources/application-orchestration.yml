@@ -25,19 +25,17 @@ orchestrator:
   # (TMF-701, action registry). Binding:
   # ca.siva.orchestrator.config.HttpClientProperties.
   #
-  # Any of the three keys below can be omitted — the record applies its
-  # defaults. Values shown here are the defaults, commented so operators can
-  # copy, uncomment, and tune without hunting in Java source.
+  # Any key below can be omitted — the record applies its defaults. Values
+  # shown here are operator-tuned; uncomment / override to change.
   http:
-    # JDK HttpClient connect timeout (TCP handshake). Default: 1200s (20 min).
+    # JDK HttpClient connect timeout (TCP handshake). Default: 120s.
     # Spring Duration parser — accepts 30s, PT5M, 1500ms, 1200s, etc.
      connect-timeout: 120
     #
-    # Per-request read timeout (server silent after first byte). Default: 1200s.
+    # Per-request read timeout (server silent after first byte). Default: 120s.
      read-timeout: 120
     #
-    # HTTP status codes that trigger the shared RetryTemplate (1 initial +
-    # 3 retries, exponential 500ms → 4s). Default:
+    # HTTP status codes that trigger the shared RetryTemplate. Default:
     #   [408, 429, 500, 502, 503, 504]
     # i.e. the RFC-transient 4xx pair plus the common 5xx family. Remove or
     # add codes here without recompiling — both Tmf701Client and ActionRegistry
@@ -49,6 +47,24 @@ orchestrator:
        - 502
        - 503
        - 504
+    #
+    # Retry budget for the shared RetryTemplate. Every knob is optional —
+    # HttpClientProperties.Retry applies the documented defaults when absent.
+    # retry:
+    #   # TOTAL attempts (Spring Retry semantics), NOT retry count:
+    #   # max-attempts: 3 → 1 initial call + 2 retries.
+    #   # Values < 1 snap back to the default.
+    #   max-attempts: 3
+    #   # First inter-attempt wait. Spring Duration parser — 500ms, PT0.5S, etc.
+    #   initial-backoff: 500ms
+    #   # Upper bound on the growing wait. Once delay_n hits this cap,
+    #   # every subsequent retry waits exactly this long.
+    #   max-backoff: 4s
+    #   # Exponential growth factor:
+    #   #   delay_n = min(initialBackoff * multiplier^(n-1), maxBackoff)
+    #   # Values ≤ 1.0 snap to the default (flat/shrinking backoff is almost
+    #   # always a misconfiguration).
+    #   multiplier: 2.0
 
   dag:
     location: classpath:dag/

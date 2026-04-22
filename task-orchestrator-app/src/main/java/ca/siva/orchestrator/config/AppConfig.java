@@ -96,24 +96,32 @@ public class AppConfig {
      * credentials, not found) — the response would be identical on the next
      * attempt, so retrying just wastes latency budget.</p>
      *
-     * <p><b>Budget:</b> 1 initial attempt + 3 retries = up to 4 attempts.
-     * Backoff starts at 500 ms and doubles up to 4 s, so the worst-case
-     * end-to-end wait is ~0.5 + 1 + 2 + 4 ≈ 7.5 s before the call finally
-     * fails through to the caller (which today logs and swallows).</p>
+     * <p><b>Budget:</b> Every knob — attempt count, backoff initial / max /
+     * multiplier — is sourced from {@link HttpClientProperties.Retry}
+     * (yml prefix {@code orchestrator.http.retry}). Defaults produce 3
+     * attempts total (1 initial + 2 retries) with 500 ms → 4 s exponential
+     * waits, i.e. ~1.5 s of total inter-attempt delay before the caller sees
+     * the failure.</p>
      */
     @Bean
-    public RetryTemplate httpCallRetryTemplate() {
+    public RetryTemplate httpCallRetryTemplate(HttpClientProperties httpProps) {
         Map<Class<? extends Throwable>, Boolean> retryable = Map.of(
                 ResourceAccessException.class, true,
                 HttpServerErrorException.class, true,
                 TransientClientError.class,     true
         );
-        SimpleRetryPolicy policy = new SimpleRetryPolicy(4, retryable, true);
+        HttpClientProperties.Retry retry = httpProps.retry();
+
+        // SimpleRetryPolicy's first arg is TOTAL attempts (Spring Retry
+        // semantics), not retry count — a value of 3 here means 1 initial
+        // call + 2 retries, matching how the operator will read the yml key
+        // orchestrator.http.retry.max-attempts.
+        SimpleRetryPolicy policy = new SimpleRetryPolicy(retry.maxAttempts(), retryable, true);
 
         ExponentialBackOffPolicy backoff = new ExponentialBackOffPolicy();
-        backoff.setInitialInterval(500);
-        backoff.setMultiplier(2.0);
-        backoff.setMaxInterval(4_000);
+        backoff.setInitialInterval(retry.initialBackoff().toMillis());
+        backoff.setMultiplier(retry.multiplier());
+        backoff.setMaxInterval(retry.maxBackoff().toMillis());
 
         RetryTemplate template = new RetryTemplate();
         template.setRetryPolicy(policy);

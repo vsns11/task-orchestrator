@@ -98,9 +98,13 @@ class Tmf701ClientTest {
         RetryTemplate noRetryTemplate = new RetryTemplate();
         noRetryTemplate.setRetryPolicy(new NeverRetryPolicy());
         // HttpClientProperties with nulls applies its record defaults
-        // (1200s timeouts, 408/429/500/502/503/504 retryable set) — exactly
-        // what the tests want to observe.
-        HttpClientProperties httpProps = new HttpClientProperties(null, null, null);
+        // (120s timeouts, 408/429/500/502/503/504 retryable set,
+        // 3 total attempts / 500ms→4s exponential retry budget) — exactly
+        // what the tests want to observe. The RetryTemplate passed above is
+        // the NeverRetryPolicy one, so the Retry config is only consulted
+        // when the test explicitly wires it; these defaults just keep the
+        // bean happy.
+        HttpClientProperties httpProps = new HttpClientProperties(null, null, null, null);
         client = new Tmf701Client(props, creds, builder, environment, mapper, noRetryTemplate, httpProps);
         client.init();                                   // simulate ApplicationReadyEvent
     }

@@ -8,28 +8,34 @@ import java.util.List;
 /**
  * HTTP-client-wide tuning knobs shared by every outbound REST caller
  * (TMF-701, action registry). Centralising these removes per-client drift
- * and makes the retry budget visible in yml instead of buried in Java
- * literals.
+ * and makes both the timeout and retry budgets visible in yml instead of
+ * buried in Java literals.
  *
  * <h3>YAML keys (prefix {@code orchestrator.http})</h3>
  * <pre>
  * orchestrator:
  *   http:
- *     connect-timeout: 1200s           # default if unset: 1200 seconds (PT20M)
- *     read-timeout: 1200s              # default if unset: 1200 seconds (PT20M)
- *     retryable-statuses: [408, 429, 500, 502, 503, 504]   # default set
+ *     connect-timeout: 120s                                  # default: 120 s
+ *     read-timeout: 120s                                     # default: 120 s
+ *     retryable-statuses: [408, 429, 500, 502, 503, 504]     # default set
+ *     retry:
+ *       max-attempts: 3                                      # total attempts (1 initial + 2 retries)
+ *       initial-backoff: 500ms                               # first wait between retries
+ *       max-backoff: 4s                                      # cap on the growing wait
+ *       multiplier: 2.0                                      # exponential growth factor
  * </pre>
  *
  * <h3>Defaults</h3>
  * <ul>
- *   <li>{@code connectTimeout} and {@code readTimeout} default to
- *       {@code 1200 s} (20 min). The JDK {@link java.net.http.HttpClient}
- *       does not enforce a connect timeout when one is not set; a conservative
- *       floor avoids a thread-per-request hanging forever on a black-holed
- *       destination.</li>
- *   <li>{@code retryableStatuses} defaults to {@code [408, 429, 500, 502, 503, 504]}
- *       — the RFC-transient 4xx pair plus the common 5xx family. Tuning this
- *       list is a yml edit, no recompile.</li>
+ *   <li>{@code connectTimeout} / {@code readTimeout} default to
+ *       {@link #DEFAULT_TIMEOUT} ({@value #DEFAULT_TIMEOUT_SECONDS} s).</li>
+ *   <li>{@code retryableStatuses} defaults to the RFC-transient 4xx pair
+ *       plus the common 5xx family — see {@link #DEFAULT_RETRYABLE_STATUSES}.</li>
+ *   <li>{@code retry.maxAttempts} defaults to {@code 3} — Spring Retry counts
+ *       TOTAL attempts, so this is 1 initial call + 2 retries.</li>
+ *   <li>{@code retry.initialBackoff} / {@code retry.maxBackoff} /
+ *       {@code retry.multiplier} default to {@code 500 ms} / {@code 4 s} /
+ *       {@code 2.0}.</li>
  * </ul>
  *
  * <p>Durations follow Spring Boot's standard parser (supports {@code 30s},
@@ -39,11 +45,14 @@ import java.util.List;
 public record HttpClientProperties(
         Duration connectTimeout,
         Duration readTimeout,
-        List<Integer> retryableStatuses
+        List<Integer> retryableStatuses,
+        Retry retry
 ) {
 
-    /** Fallback when the operator hasn't declared a value. */
-    public static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(120);
+    static final long DEFAULT_TIMEOUT_SECONDS = 120L;
+
+    /** Fallback when the operator hasn't declared a timeout. */
+    public static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(DEFAULT_TIMEOUT_SECONDS);
 
     /**
      * Default retryable HTTP status codes. The set is chosen to be safely
@@ -59,8 +68,8 @@ public record HttpClientProperties(
 
     /**
      * Canonical (compact) constructor applies defaults for any value the
-     * operator left unset. Also freezes the status list into a {@link Set}-
-     * backed view so membership checks are O(1) regardless of list size.
+     * operator left unset. Also defensively copies the status list so a
+     * mutable yml-sourced list can't be swapped under us at runtime.
      */
     public HttpClientProperties {
         if (connectTimeout == null) {
@@ -72,9 +81,10 @@ public record HttpClientProperties(
         if (retryableStatuses == null || retryableStatuses.isEmpty()) {
             retryableStatuses = DEFAULT_RETRYABLE_STATUSES;
         } else {
-            // Defensive copy so a mutable yml-sourced list can't be swapped
-            // under us at runtime.
             retryableStatuses = List.copyOf(retryableStatuses);
+        }
+        if (retry == null) {
+            retry = Retry.defaults();
         }
     }
 
@@ -88,5 +98,62 @@ public record HttpClientProperties(
      */
     public boolean isRetryableStatus(int status) {
         return retryableStatuses.contains(status);
+    }
+
+    /**
+     * Nested config for the shared {@code RetryTemplate} bean
+     * ({@code AppConfig.httpCallRetryTemplate}).
+     *
+     * <h4>Semantics</h4>
+     * <ul>
+     *   <li>{@code maxAttempts} is TOTAL attempts (Spring Retry semantics),
+     *       NOT the retry count. {@code maxAttempts=3} ⇒ 1 initial call +
+     *       2 retries.</li>
+     *   <li>Wait between attempts grows exponentially:
+     *       {@code delay_n = min(initialBackoff * multiplier^(n-1), maxBackoff)}.</li>
+     * </ul>
+     */
+    public record Retry(
+            Integer maxAttempts,
+            Duration initialBackoff,
+            Duration maxBackoff,
+            Double multiplier
+    ) {
+
+        /** 1 initial + 2 retries = 3 attempts total. */
+        public static final int DEFAULT_MAX_ATTEMPTS = 3;
+
+        /** First inter-attempt wait. */
+        public static final Duration DEFAULT_INITIAL_BACKOFF = Duration.ofMillis(500);
+
+        /** Upper bound on the growing wait. */
+        public static final Duration DEFAULT_MAX_BACKOFF = Duration.ofSeconds(4);
+
+        /** Growth factor — 2.0 doubles each time. */
+        public static final double DEFAULT_MULTIPLIER = 2.0;
+
+        public Retry {
+            if (maxAttempts == null || maxAttempts < 1) {
+                maxAttempts = DEFAULT_MAX_ATTEMPTS;
+            }
+            if (initialBackoff == null) {
+                initialBackoff = DEFAULT_INITIAL_BACKOFF;
+            }
+            if (maxBackoff == null) {
+                maxBackoff = DEFAULT_MAX_BACKOFF;
+            }
+            if (multiplier == null || multiplier <= 1.0) {
+                // A multiplier of 1.0 or less would either produce a flat or
+                // shrinking backoff — almost always a misconfiguration. Snap
+                // back to the documented default rather than silently
+                // disabling exponential growth.
+                multiplier = DEFAULT_MULTIPLIER;
+            }
+        }
+
+        /** Fully-defaulted Retry, used when the {@code retry:} block is absent. */
+        public static Retry defaults() {
+            return new Retry(null, null, null, null);
+        }
     }
 }

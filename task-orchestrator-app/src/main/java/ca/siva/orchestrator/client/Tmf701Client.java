@@ -308,8 +308,12 @@ public class Tmf701Client {
     private <T> T executeWithRetry(String label, Supplier<T> call) {
         return httpCallRetryTemplate.execute(ctx -> {
             if (ctx.getRetryCount() > 0) {
-                log.warn("TMF-701 {} retry attempt {} after {}",
-                        label, ctx.getRetryCount() + 1,
+                // RetryContext.getRetryCount() is the count of PRIOR failures,
+                // which equals the retry number about to run: 1, 2, 3.
+                // No +1 offset — that would log "retry 4" on the 3rd retry and
+                // make the budget look bigger than it is.
+                log.warn("TMF-701 {} retry {} after {}",
+                        label, ctx.getRetryCount(),
                         ctx.getLastThrowable() == null ? "<no prior error>" : ctx.getLastThrowable().toString());
             }
             try {
