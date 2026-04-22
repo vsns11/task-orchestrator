@@ -21,6 +21,35 @@ orchestrator:
     username: ${FID_USERNAME:}
     password: ${FID_PASSWORD:}
 
+  # HTTP client tuning shared by EVERY outbound REST caller
+  # (TMF-701, action registry). Binding:
+  # ca.siva.orchestrator.config.HttpClientProperties.
+  #
+  # Any of the three keys below can be omitted — the record applies its
+  # defaults. Values shown here are the defaults, commented so operators can
+  # copy, uncomment, and tune without hunting in Java source.
+  http:
+    # JDK HttpClient connect timeout (TCP handshake). Default: 1200s (20 min).
+    # Spring Duration parser — accepts 30s, PT5M, 1500ms, 1200s, etc.
+     connect-timeout: 120
+    #
+    # Per-request read timeout (server silent after first byte). Default: 1200s.
+     read-timeout: 120
+    #
+    # HTTP status codes that trigger the shared RetryTemplate (1 initial +
+    # 3 retries, exponential 500ms → 4s). Default:
+    #   [408, 429, 500, 502, 503, 504]
+    # i.e. the RFC-transient 4xx pair plus the common 5xx family. Remove or
+    # add codes here without recompiling — both Tmf701Client and ActionRegistry
+    # translate matching responses into the retry-friendly marker.
+     retryable-statuses:
+       - 408
+       - 429
+       - 500
+       - 502
+       - 503
+       - 504
+
   dag:
     location: classpath:dag/
   tmf701:

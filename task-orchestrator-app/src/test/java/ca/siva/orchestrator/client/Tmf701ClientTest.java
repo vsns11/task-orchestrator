@@ -1,6 +1,7 @@
 package ca.siva.orchestrator.client;
 
 import ca.siva.orchestrator.config.FidCredentialsProperties;
+import ca.siva.orchestrator.config.HttpClientProperties;
 import ca.siva.orchestrator.config.Tmf701Properties;
 import ca.siva.orchestrator.dto.tmf.ProcessFlow;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -14,6 +15,8 @@ import org.springframework.core.env.Environment;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.retry.policy.NeverRetryPolicy;
+import org.springframework.retry.support.RetryTemplate;
 import org.springframework.test.web.client.ExpectedCount;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
@@ -86,7 +89,19 @@ class Tmf701ClientTest {
         FidCredentialsProperties   creds = new FidCredentialsProperties("", "");
         when(environment.getProperty("local.server.port")).thenReturn(null);
 
-        client = new Tmf701Client(props, creds, builder, environment, mapper);
+        // Plain `new RetryTemplate()` uses a default SimpleRetryPolicy that
+        // treats every Exception as retryable — that would make every unit
+        // test fire multiple wire calls and blow up MockRestServiceServer's
+        // ExpectedCount.once() expectations. Install NeverRetryPolicy so each
+        // test observes exactly one attempt; retry behaviour itself is covered
+        // in a dedicated integration test.
+        RetryTemplate noRetryTemplate = new RetryTemplate();
+        noRetryTemplate.setRetryPolicy(new NeverRetryPolicy());
+        // HttpClientProperties with nulls applies its record defaults
+        // (1200s timeouts, 408/429/500/502/503/504 retryable set) — exactly
+        // what the tests want to observe.
+        HttpClientProperties httpProps = new HttpClientProperties(null, null, null);
+        client = new Tmf701Client(props, creds, builder, environment, mapper, noRetryTemplate, httpProps);
         client.init();                                   // simulate ApplicationReadyEvent
     }
 

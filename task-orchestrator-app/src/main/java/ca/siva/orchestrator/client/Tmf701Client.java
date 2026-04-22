@@ -1,6 +1,9 @@
 package ca.siva.orchestrator.client;
 
+import ca.siva.orchestrator.config.AppConfig;
+import ca.siva.orchestrator.config.AppConfig.TransientClientError;
 import ca.siva.orchestrator.config.FidCredentialsProperties;
+import ca.siva.orchestrator.config.HttpClientProperties;
 import ca.siva.orchestrator.config.Tmf701Properties;
 import ca.siva.orchestrator.dto.tmf.ProcessFlow;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -12,6 +15,7 @@ import org.springframework.context.event.EventListener;
 import org.springframework.core.env.Environment;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.retry.support.RetryTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
@@ -20,6 +24,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 /**
  * HTTP client for the TMF-701 processFlow API.
@@ -62,11 +67,21 @@ public class Tmf701Client {
      */
     private static final MediaType MERGE_PATCH_JSON = MediaType.valueOf("application/merge-patch+json");
 
+    /**
+     * Explicit {@code Accept} header for GET. TMF-701 servers sometimes default
+     * to XML if no Accept is sent; pinning to JSON with an explicit charset
+     * removes any server-side content-negotiation ambiguity and keeps log
+     * diagnostics consistent.
+     */
+    private static final MediaType JSON_UTF8 = MediaType.valueOf("application/json;charset=utf-8");
+
     private final Tmf701Properties         props;
     private final FidCredentialsProperties fidCreds;
     private final RestClient.Builder       builder;
     private final Environment              environment;
     private final ObjectMapper             objectMapper;
+    private final RetryTemplate            httpCallRetryTemplate;
+    private final HttpClientProperties     httpProps;
 
     private RestClient client;
     /** Cached base URL — resolved at ApplicationReadyEvent, reused in log messages. */
@@ -208,10 +223,12 @@ public class Tmf701Client {
         String url = fullUrl(processFlowId);
         log.info("TMF-701 Get url={}", url);
         try {
-            ProcessFlow processFlow = client.get()
-                    .uri(props.processFlowPath(), processFlowId)
-                    .retrieve()
-                    .body(ProcessFlow.class);
+            ProcessFlow processFlow = executeWithRetry("Get " + processFlowId, () ->
+                    client.get()
+                            .uri(props.processFlowPath(), processFlowId)
+                            .accept(JSON_UTF8)
+                            .retrieve()
+                            .body(ProcessFlow.class));
             return Optional.ofNullable(processFlow);
         } catch (RestClientResponseException e) {
             log.error("TMF-701 Get failed url={} status={} responseBody={} exception={}",
@@ -251,22 +268,68 @@ public class Tmf701Client {
         }
         log.info("TMF-701 {} url={} body={}", label, url, bodyJson);
         try {
-            client.patch()
-                    .uri(props.processFlowPath(), processFlowId)
-                    .contentType(MERGE_PATCH_JSON)
-                    .body(bodyJson)
-                    .retrieve()
-                    .toBodilessEntity();
+            executeWithRetry(label, () -> {
+                client.patch()
+                        .uri(props.processFlowPath(), processFlowId)
+                        .contentType(MERGE_PATCH_JSON)
+                        .accept(JSON_UTF8)
+                        .body(bodyJson)
+                        .retrieve()
+                        .toBodilessEntity();
+                return null;
+            });
             log.info("TMF-701 {} ok", label);
         } catch (RestClientResponseException e) {
             log.error("TMF-701 {} failed url={} status={} responseBody={} requestBody={} exception={}",
                     label, url, e.getStatusCode(), e.getResponseBodyAsString(), bodyJson, e.toString(), e);
         } catch (RuntimeException e) {
-            // Transport-level (connect/read timeout) failures land here.
-            // Orchestration stays alive either way.
+            // Transport-level (connect/read timeout) failures land here AFTER
+            // the retry budget is exhausted. Orchestration stays alive either way.
             log.error("TMF-701 {} transport error url={} requestBody={} exception={}",
                     label, url, bodyJson, e.toString(), e);
         }
+    }
+
+    /**
+     * Executes an HTTP call under the shared {@link RetryTemplate} policy
+     * (see {@link AppConfig#httpCallRetryTemplate()}). Transient 4xx responses
+     * (408 Request Timeout, 429 Too Many Requests) are translated to
+     * {@link TransientClientError} so the retry policy picks them up alongside
+     * 5xx and connect/read timeouts. Non-retryable errors (other 4xx) escape
+     * immediately and are handled by the caller.
+     *
+     * @param label  short tag used in retry-warning log lines
+     * @param call   wire call — must be idempotent by design (GET is;
+     *               merge-patch PATCH is because we send the same merged body
+     *               and our idempotency key on the server is the taskFlowId)
+     * @return whatever {@code call} returns, or the throwable propagates once
+     *         the retry budget is exhausted
+     */
+    private <T> T executeWithRetry(String label, Supplier<T> call) {
+        return httpCallRetryTemplate.execute(ctx -> {
+            if (ctx.getRetryCount() > 0) {
+                log.warn("TMF-701 {} retry attempt {} after {}",
+                        label, ctx.getRetryCount() + 1,
+                        ctx.getLastThrowable() == null ? "<no prior error>" : ctx.getLastThrowable().toString());
+            }
+            try {
+                return call.get();
+            } catch (RestClientResponseException e) {
+                int status = e.getStatusCode().value();
+                // Any status the operator has declared retryable (default set
+                // 408/429/500/502/503/504; fully configurable via
+                // orchestrator.http.retryable-statuses) is translated into the
+                // retry-friendly marker. 5xx instances can also reach the
+                // retry template directly as HttpServerErrorException — both
+                // paths are already in the whitelist, so behaviour is
+                // belt-and-suspenders.
+                if (httpProps.isRetryableStatus(status)) {
+                    throw new TransientClientError(
+                            "Retryable status=" + status, e);
+                }
+                throw e;
+            }
+        });
     }
 
     /** Resolves the full URL with {id} substituted — for log output. */

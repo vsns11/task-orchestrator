@@ -2,7 +2,10 @@ package ca.siva.orchestrator.actionregistry;
 
 import ca.siva.orchestrator.client.BasicAuthSupport;
 import ca.siva.orchestrator.config.ActionRegistryProperties;
+import ca.siva.orchestrator.config.AppConfig;
+import ca.siva.orchestrator.config.AppConfig.TransientClientError;
 import ca.siva.orchestrator.config.FidCredentialsProperties;
+import ca.siva.orchestrator.config.HttpClientProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -10,9 +13,12 @@ import org.springframework.context.event.EventListener;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.core.env.Environment;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.retry.support.RetryTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientResponseException;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -23,6 +29,7 @@ import java.util.Optional;
 import java.util.StringJoiner;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Supplier;
 
 import static ca.siva.orchestrator.actionregistry.ActionNames.DCX_KEY_DEL;
 import static ca.siva.orchestrator.actionregistry.ActionNames.DEFAULT;
@@ -73,10 +80,15 @@ public class ActionRegistry {
     private static final String MSG_FETCH_FAILED     = "{} fetch failed from {} — keeping existing {} entries, exception={}";
     private static final String UNKNOWN_DCX          = "UNKNOWN";
 
+    /** Pinned JSON accept for every GET — matches what Tmf701Client sends. */
+    private static final MediaType JSON_UTF8 = MediaType.valueOf("application/json;charset=utf-8");
+
     private final ActionRegistryProperties props;
     private final FidCredentialsProperties fidCreds;
     private final RestClient.Builder       builder;
     private final Environment              environment;
+    private final RetryTemplate            httpCallRetryTemplate;
+    private final HttpClientProperties     httpProps;
 
     /** actionName → ActionCodeEntry (from GET /action-codes). Named after ActionBuilder's field. */
     private final Map<String, ActionCodeEntry> mapActionNameToActionCode = new ConcurrentHashMap<>();
@@ -507,10 +519,12 @@ public class ActionRegistry {
      *         response, {@code false} when existing entries were preserved
      */
     private boolean loadActionCodes(RestClient client) {
-        List<ActionCodeEntry> entries = client.get()
-                .uri(props.actionCodesPath())
-                .retrieve()
-                .body(new ParameterizedTypeReference<>() {});
+        List<ActionCodeEntry> entries = executeWithRetry(API_ACTION_CODES, () ->
+                client.get()
+                        .uri(props.actionCodesPath())
+                        .accept(JSON_UTF8)
+                        .retrieve()
+                        .body(new ParameterizedTypeReference<List<ActionCodeEntry>>() {}));
 
         if (entries == null || entries.isEmpty()) {
             log.warn(MSG_KEEP_EXISTING, API_ACTION_CODES, mapActionNameToActionCode.size());
@@ -562,10 +576,13 @@ public class ActionRegistry {
      *         response, {@code false} when existing entries were preserved
      */
     private boolean loadDcxActionCodes(RestClient client) {
-        List<DcxActionCodeEntry> entries = client.get()
-                .uri(props.dcxActionCodesPath())
-                .retrieve()
-                .body(new ParameterizedTypeReference<>() {});
+        List<DcxActionCodeEntry> entries = executeWithRetry(API_DCX_ACTION_CODES, () ->
+                client.get()
+                        .uri(props.dcxActionCodesPath())
+                        .accept(JSON_UTF8)
+                        .retrieve()
+                        .body(new ParameterizedTypeReference<>() {
+                        }));
 
         if (entries == null || entries.isEmpty()) {
             log.warn(MSG_KEEP_EXISTING, API_DCX_ACTION_CODES, mapActionCodeToDcxActionCode.size());
@@ -625,5 +642,37 @@ public class ActionRegistry {
         return Optional.ofNullable(environment.getProperty("local.server.port"))
                 .map(port -> props.baseUrl().replaceFirst(":\\d+/", ":" + port + "/"))
                 .orElse(props.baseUrl());
+    }
+
+    /**
+     * Runs an HTTP call under the shared retry policy
+     * (see {@link AppConfig#httpCallRetryTemplate()}): 1 initial attempt +
+     * 3 retries, exponential backoff, retries on 5xx + transport errors + 408
+     * + 429. Transient 4xx responses are translated to
+     * {@link TransientClientError} so the retry policy picks them up.
+     */
+    private <T> T executeWithRetry(String label, Supplier<T> call) {
+        return httpCallRetryTemplate.execute(ctx -> {
+            if (ctx.getRetryCount() > 0) {
+                log.warn("Action registry {} retry attempt {} after {}",
+                        label, ctx.getRetryCount() + 1,
+                        ctx.getLastThrowable() == null ? "<no prior error>" : ctx.getLastThrowable().toString());
+            }
+            try {
+                return call.get();
+            } catch (RestClientResponseException e) {
+                int status = e.getStatusCode().value();
+                // Retryable set is operator-configurable via
+                // orchestrator.http.retryable-statuses (default
+                // 408/429/500/502/503/504). Translating here keeps the retry
+                // whitelist in one place — the properties bean — instead of
+                // splitting it between config and a hardcoded Java predicate.
+                if (httpProps.isRetryableStatus(status)) {
+                    throw new TransientClientError(
+                            "Retryable status=" + status, e);
+                }
+                throw e;
+            }
+        });
     }
 }
