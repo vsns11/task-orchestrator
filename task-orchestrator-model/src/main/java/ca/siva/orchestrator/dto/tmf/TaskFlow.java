@@ -1,5 +1,7 @@
 package ca.siva.orchestrator.dto.tmf;
 
+import ca.siva.orchestrator.dto.tmf.ProcessFlow.Characteristic;
+import ca.siva.orchestrator.dto.tmf.ProcessFlow.RelatedEntity;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -24,7 +26,7 @@ import java.util.Objects;
  * <p>Used as the value of {@code ActionResponse.taskFlowResponse} — it carries
  * the completed taskFlow's business result, with domain-specific outputs
  * (e.g. {@code status=pass|fail}, diagnostic summaries) surfaced as
- * {@link ProcessFlow.Characteristic} entries per the TMF convention.</p>
+ * {@link Characteristic} entries per the TMF convention.</p>
  *
  * <p>The {@code Characteristic} and {@code RelatedEntity} inner types are reused
  * from {@link ProcessFlow} to keep the model consistent.</p>
@@ -63,7 +65,7 @@ public class TaskFlow implements Serializable {
     private List<Object> channel;
     private List<Object> relatedParty;
 
-    private List<ProcessFlow.RelatedEntity> relatedEntity;
+    private List<RelatedEntity> relatedEntity;
 
     /**
      * Name/value pairs. Domain outputs (status, diagnosticSummary, latencyMs, …)
@@ -71,7 +73,7 @@ public class TaskFlow implements Serializable {
      * rejects a COMPLETED task.event when the {@code status} characteristic
      * exists and is not {@code pass} (case-insensitive).
      */
-    private List<ProcessFlow.Characteristic> characteristic;
+    private List<Characteristic> characteristic;
 
     private List<TaskFlowRelationship> taskFlowRelationship;
 

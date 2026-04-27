@@ -45,6 +45,14 @@ public class ProcessFlow {
 
     private List<Object> relatedParty;
     private List<RelatedEntity> relatedEntity;
+    /**
+     * TMF-701 typed array of {@link TaskFlowRef} pointers to the TaskFlow
+     * resources that have been spawned under this processFlow. Populated
+     * incrementally as each task in a batch completes — mirrors the legacy
+     * Bonita {@code processFlow.addTaskFlowItem(buildTaskFlow(...))} contract
+     * so downstream consumers see the same {@code taskFlow[]} array shape.
+     */
+    private List<TaskFlowRef> taskFlow;
     private List<Characteristic> characteristic;
     private String processFlowSpecification;
 
@@ -65,7 +73,17 @@ public class ProcessFlow {
         private String referredType;
     }
 
-    /** Key-value characteristic on the processFlow (e.g. peinNumber, SDT Transaction ID). */
+    /**
+     * Key-value characteristic on the processFlow (e.g. peinNumber, SDT
+     * Transaction ID, processStatus, statusChangeReason).
+     *
+     * <p>{@code @type} and {@code @baseType} mirror the legacy Bonita
+     * {@code Characteristic.setAtType(STRING) / setAtBaseType(STRING)} pair so
+     * the wire payload is byte-identical to the upstream
+     * {@code processFlowEntryAction} output. Both fields are NON_NULL-omitted
+     * by Jackson when unset, so existing callers that don't populate them stay
+     * compatible.</p>
+     */
     @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @JsonIgnoreProperties(ignoreUnknown = true)
@@ -74,6 +92,13 @@ public class ProcessFlow {
         private String name;
         private String value;
         private String valueType;
+
+        @JsonProperty("@type")
+        private String type;
+
+        @JsonProperty("@baseType")
+        private String baseType;
+
         private List<Object> characteristicRelationship;
     }
 }

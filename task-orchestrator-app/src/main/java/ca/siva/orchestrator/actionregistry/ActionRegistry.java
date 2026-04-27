@@ -31,9 +31,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 
-import static ca.siva.orchestrator.actionregistry.ActionNames.DCX_KEY_DEL;
-import static ca.siva.orchestrator.actionregistry.ActionNames.DEFAULT;
-
 /**
  * In-process replica of the upstream {@code ca.bell.itsa.sharp.bpm2.ActionBuilder}
  * — same public behaviour, same lookup chains, same key building.
@@ -402,9 +399,9 @@ public class ActionRegistry {
 
         String key;
         if (codeStartsWith0(actionCode)) {
-            key = buildKeyForDcxActionCode(actionCode, DEFAULT, modemType);
+            key = buildKeyForDcxActionCode(actionCode, ActionNames.DEFAULT, modemType);
         } else {
-            key = buildKeyForDcxActionCode(actionCode, flowType, DEFAULT);
+            key = buildKeyForDcxActionCode(actionCode, flowType, ActionNames.DEFAULT);
         }
 
         DcxActionCodeEntry dcxEntry = mapActionCodeToDcxActionCode.get(key);
@@ -414,7 +411,7 @@ public class ActionRegistry {
         }
 
         // Fallback to the DEFAULT/DEFAULT row — matches ActionBuilder.getDcxCodeByActionName
-        String fallbackKey = buildKeyForDcxActionCode(actionCode, DEFAULT, DEFAULT);
+        String fallbackKey = buildKeyForDcxActionCode(actionCode, ActionNames.DEFAULT, ActionNames.DEFAULT);
         DcxActionCodeEntry fallbackEntry = mapActionCodeToDcxActionCode.get(fallbackKey);
         return fallbackEntry != null ? fallbackEntry.getDcxActionCode() : null;
     }
@@ -424,7 +421,7 @@ public class ActionRegistry {
      * sites (DAG-driven flow) that don't track flowType / modemType.
      */
     public String getDcxActionCodeByName(String actionName) {
-        return getDcxActionCodeByName(actionName, DEFAULT, DEFAULT);
+        return getDcxActionCodeByName(actionName, ActionNames.DEFAULT, ActionNames.DEFAULT);
     }
 
     // =================================================================
@@ -437,7 +434,7 @@ public class ActionRegistry {
      * Mirrors {@code ActionBuilder.buildKeyForDcxActionCode}.
      */
     public static String buildKeyForDcxActionCode(String actionCode, String flowType, String modemType) {
-        return new StringJoiner(DCX_KEY_DEL)
+        return new StringJoiner(ActionNames.DCX_KEY_DEL)
                 .add(nullToDefault(actionCode))
                 .add(nullToDefault(flowType))
                 .add(nullToDefault(modemType))
@@ -473,7 +470,7 @@ public class ActionRegistry {
             return Optional.empty();
         }
         String actionCode = getActionCodeByName(actionName);
-        String dcxActionCode = getDcxActionCodeByName(actionName, DEFAULT, DEFAULT);
+        String dcxActionCode = getDcxActionCodeByName(actionName, ActionNames.DEFAULT, ActionNames.DEFAULT);
         return Optional.of(new ActionDefinition(
                 actionCode, actionName, dcxActionCode != null ? dcxActionCode : UNKNOWN_DCX));
     }
@@ -635,7 +632,7 @@ public class ActionRegistry {
     }
 
     private static String nullToDefault(String value) {
-        return (value == null || value.isBlank()) ? DEFAULT : value;
+        return (value == null || value.isBlank()) ? ActionNames.DEFAULT : value;
     }
 
     private String resolveBaseUrl() {

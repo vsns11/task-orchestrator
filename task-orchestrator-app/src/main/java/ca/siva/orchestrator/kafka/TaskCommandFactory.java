@@ -1,8 +1,8 @@
 package ca.siva.orchestrator.kafka;
 
+import ca.siva.orchestrator.actionregistry.ActionNames;
 import ca.siva.orchestrator.actionregistry.ActionRegistry;
 import ca.siva.orchestrator.dag.DagDefinition;
-import ca.siva.orchestrator.domain.ExecutionMode;
 import ca.siva.orchestrator.domain.Intent;
 import ca.siva.orchestrator.domain.MessageName;
 import ca.siva.orchestrator.domain.MessageType;
@@ -21,8 +21,6 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
-
-import static ca.siva.orchestrator.actionregistry.ActionNames.DEFAULT;
 
 /**
  * Factory for constructing {@link TaskCommand} messages.
@@ -153,6 +151,6 @@ public class TaskCommandFactory {
      * before {@code buildKeyForDcxActionCode} runs.
      */
     private static String nonBlankOrDefault(String value) {
-        return (value == null || value.isBlank()) ? DEFAULT : value;
+        return (value == null || value.isBlank()) ? ActionNames.DEFAULT : value;
     }
 }

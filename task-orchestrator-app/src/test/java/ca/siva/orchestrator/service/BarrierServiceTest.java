@@ -45,6 +45,29 @@ class BarrierServiceTest {
     @Mock TaskCommandPublisher publisher;
     @Mock Tmf701Client tmf701;
     @Mock TaskEventsPublisher taskEventsPublisher;
+    /**
+     * Final-state PATCHes (state + processStatus / statusChangeReason
+     * characteristics) are dispatched through this collaborator now —
+     * {@link Tmf701Client#patchProcessFlowState} is no longer used for
+     * end-of-flow events, only the legacy method is verified here as a back-stop.
+     */
+    @Mock ProcessFlowCompletionService completion;
+    /**
+     * Single-responsibility owner of the kickout decision. Mocked so each
+     * test can stub the decision directly with {@code Optional.of(reason)}
+     * (kickout) or {@code Optional.empty()} (clean) without standing up
+     * the row → JSON → ActionResponse parse pipeline.
+     */
+    @Mock BatchKickoutEvaluator kickoutEvaluator;
+    /**
+     * Single-trip loader for the per-batch persisted rows + parsed action
+     * responses. Mocked so each test can hand back exactly the
+     * {@link BatchResults} snapshot the SUT should see — proving by stub
+     * cardinality that the load happens at most ONCE per batch close and
+     * that the same snapshot drives both the kickout decision and the
+     * final-state PATCH.
+     */
+    @Mock BatchResultsLoader batchResultsLoader;
     @InjectMocks BarrierService service;
 
     @Test
@@ -104,12 +127,17 @@ class BarrierServiceTest {
         when(repo.findByCorrelationIdAndBatchIndex(anyString(), anyShort())).thenReturn(Optional.of(barrier));
         // Only 1 batch in DAG — after closing batch 0, flow completes
         when(dagRegistry.find("TestDAG")).thenReturn(Optional.of(dagWithBatches(1)));
+        // Clean batch: loader returns whatever rows / responses the test
+        // doesn't care about, evaluator says "no kickout".
+        when(batchResultsLoader.load(eq("corr-1"), eq((short) 0)))
+                .thenReturn(emptyBatchResults());
+        when(kickoutEvaluator.evaluate(any(BatchResults.class))).thenReturn(Optional.empty());
 
         var taskCommand = buildTaskCommand(TaskStatus.COMPLETED, 0);
         service.applyTaskEvent(taskCommand);
 
         assertThat(barrier.getStatus()).isEqualTo(BarrierStatus.CLOSED);
-        verify(tmf701).patchProcessFlowState(anyString(), eq("completed"));
+        verify(completion).patchCompleted(anyString(), any());
     }
 
     @Test
@@ -121,6 +149,9 @@ class BarrierServiceTest {
 
         assertThat(barrier.getStatus()).isEqualTo(BarrierStatus.OPEN);
         assertThat(barrier.getTaskCompleted()).isEqualTo(1);
+        // Pending > 0: loader must NOT be invoked. Proves the load is gated
+        // on barrier draining, not on every task.event.
+        verifyNoInteractions(batchResultsLoader);
     }
 
     @Test
@@ -144,7 +175,12 @@ class BarrierServiceTest {
     }
 
     @Test
-    void applyTaskEvent_failed_nonRetryable_failsBarrier() {
+    void applyTaskEvent_failed_nonRetryable_deferredUntilBatchCloses() {
+        // Deferred-decision contract: a single non-retryable FAILED in a
+        // 2-task batch must NOT fail the barrier yet — its sibling has not
+        // reported in. taskFailed advances, the barrier stays OPEN, and the
+        // final-state PATCH is NOT yet dispatched. (The promote-vs-kickout
+        // decision is taken by closeBatchAndDecide once pending == 0.)
         var barrier = barrierWithTotal(2, 0);
         when(repo.findByCorrelationIdAndBatchIndex(anyString(), anyShort())).thenReturn(Optional.of(barrier));
 
@@ -152,12 +188,45 @@ class BarrierServiceTest {
         taskCommand.setError(TaskCommand.ErrorInfo.builder().retryable(false).build());
         service.applyTaskEvent(taskCommand);
 
-        assertThat(barrier.getStatus()).isEqualTo(BarrierStatus.FAILED);
-        verify(tmf701).patchProcessFlowState(anyString(), eq("failed"));
+        assertThat(barrier.getStatus()).isEqualTo(BarrierStatus.OPEN);
+        assertThat(barrier.getTaskFailed()).isEqualTo(1);
+        verify(completion, never()).patchFailed(anyString(), any());
     }
 
     @Test
-    void applyTaskEvent_failed_retryable_doesNotFailBarrier() {
+    void applyTaskEvent_failed_nonRetryable_closesAndKicksOutWhenPendingZero() {
+        // Counterpart of the deferred test above: a 1-task batch drains
+        // immediately on the only action's failure. closeBatchAndDecide
+        // loads the batch's rows once via batchResultsLoader and asks the
+        // evaluator — which here returns a non-empty kickout reason. Barrier
+        // flips to FAILED and the failed final-state PATCH + FLOW_LIFECYCLE
+        // FAILED both go out, the latter receiving the SAME responses list
+        // the kickout decision saw (zero extra DB load).
+        var barrier = barrierWithTotal(1, 0);
+        when(repo.findByCorrelationIdAndBatchIndex(anyString(), anyShort())).thenReturn(Optional.of(barrier));
+        BatchResults snapshot = emptyBatchResults();
+        when(batchResultsLoader.load(eq("corr-1"), eq((short) 0))).thenReturn(snapshot);
+        when(kickoutEvaluator.evaluate(snapshot))
+                .thenReturn(Optional.of("action=testAction row.status=FAILED"));
+
+        var taskCommand = buildTaskCommand(TaskStatus.FAILED, 0);
+        taskCommand.setError(TaskCommand.ErrorInfo.builder().retryable(false).build());
+        service.applyTaskEvent(taskCommand);
+
+        assertThat(barrier.getStatus()).isEqualTo(BarrierStatus.FAILED);
+        verify(completion).patchFailed(eq("corr-1"), eq(snapshot.responses()));
+        verify(taskEventsPublisher).publishFailed(anyString(), anyString());
+        // The load happened at most once even though it feeds two consumers.
+        verify(batchResultsLoader, times(1)).load(anyString(), anyShort());
+    }
+
+    @Test
+    void applyTaskEvent_failed_retryable_doesNotTouchAnyCounter() {
+        // Retryable failure: no counter increment AT ALL. The task-runner
+        // will redrive and we'll see the final COMPLETED/FAILED. Bumping
+        // taskFailed here would make pending() lie, drain the barrier early,
+        // and trigger a premature kickout the moment a single retryable
+        // failure landed in a multi-task batch.
         var barrier = barrierWithTotal(2, 0);
         when(repo.findByCorrelationIdAndBatchIndex(anyString(), anyShort())).thenReturn(Optional.of(barrier));
 
@@ -166,6 +235,10 @@ class BarrierServiceTest {
         service.applyTaskEvent(taskCommand);
 
         assertThat(barrier.getStatus()).isEqualTo(BarrierStatus.OPEN);
+        assertThat(barrier.getTaskFailed()).isZero();
+        assertThat(barrier.getTaskCompleted()).isZero();
+        verify(repo, never()).save(any());
+        verify(completion, never()).patchFailed(anyString(), any());
     }
 
     @Test
@@ -224,6 +297,17 @@ class BarrierServiceTest {
         return barrier;
     }
 
+    /**
+     * An empty {@link BatchResults} — the SUT only forwards {@code responses}
+     * to the completion service (which tolerates an empty list as the
+     * "no actionResponseList" cascade arm), so no row content is needed.
+     * Body-content kickout decisions are exercised in
+     * {@code BatchKickoutEvaluatorTest}.
+     */
+    private static BatchResults emptyBatchResults() {
+        return new BatchResults(List.of(), List.of());
+    }
+
     private static TaskCommand buildTaskCommand(TaskStatus status, int batchIndex) {
         var taskCommand = new TaskCommand();
         taskCommand.setEventId("e-" + System.nanoTime());
@@ -232,114 +316,86 @@ class BarrierServiceTest {
         taskCommand.setBatch(TaskCommand.Batch.builder().index(batchIndex).build());
         taskCommand.setAction(TaskCommand.Action.builder()
                 .actionName("testAction").actionCode("TEST_ACTION").build());
-        // Payload shape mirrors what MockTaskRunner (and production task-runners)
-        // emit: taskStatusCode=COMPLETED on the envelope-level result, plus a
-        // status=pass characteristic on the TMF-701 taskFlowResponse. This keeps
-        // BarrierService.validateActionResponse on its happy path so the barrier
-        // logic is exercised end-to-end.
+        // Payload shape mirrors what task-runners emit. The taskFlowResponse
+        // is left intentionally bare here — kickout body-content rules are
+        // exercised in BatchKickoutEvaluatorTest, BarrierServiceTest only
+        // proves the orchestration loop wires the right collaborators.
         taskCommand.setResult(ActionResponse.builder()
                 .name("testAction").code("TEST_ACTION").id("tf-1").type("TaskFlow")
                 .taskResult(Map.of("downstream", "ok"))
                 .taskFlowResponse(TaskFlow.builder()
                         .id("tf-1")
                         .href("http://mock/tf-1")
-                        .characteristic(List.of(
-                                ProcessFlow.Characteristic.builder()
-                                        .name("status").value("pass").build()))
                         .build())
                 .taskStatusCode("COMPLETED").build());
         return taskCommand;
     }
 
     // =================================================================
-    //  Kickout — BarrierService rejects COMPLETED task.events whose
-    //  embedded business status indicates a failure (per-action) AND
-    //  re-scans the batch for failed rows before promoting (per-batch).
-    //  These tests lock that contract in place.
+    //  Kickout — BarrierService delegates the decision to
+    //  BatchKickoutEvaluator (single source of truth) and reuses the
+    //  same in-memory BatchResults snapshot for the final-state PATCH.
     // =================================================================
 
     @Test
-    void applyTaskEvent_completed_kicksOutWhenTaskStatusCodeNotCompleted() {
+    void applyTaskEvent_completed_kickoutFromEvaluator_dispatchesFailedFinalPatch() {
+        // Evaluator says "kickout" — barrier flips to FAILED, completion
+        // patches FAILED with the SAME responses list the evaluator saw,
+        // FLOW_LIFECYCLE FAILED is published. Single load, two consumers.
         var barrier = barrierWithTotal(1, 0);
         when(repo.findByCorrelationIdAndBatchIndex(anyString(), anyShort())).thenReturn(Optional.of(barrier));
-
-        var taskCommand = buildTaskCommand(TaskStatus.COMPLETED, 0);
-        // Task-runner reported COMPLETED on the envelope but the embedded
-        // actionResponse carries a non-COMPLETED status — must fail the flow.
-        taskCommand.getResult().setTaskStatusCode("FAILED");
-        service.applyTaskEvent(taskCommand);
-
-        assertThat(barrier.getStatus()).isEqualTo(BarrierStatus.FAILED);
-        assertThat(barrier.getTaskCompleted()).isZero();
-        verify(tmf701).patchProcessFlowState(anyString(), eq("failed"));
-    }
-
-    @Test
-    void applyTaskEvent_completed_kicksOutWhenStatusCharacteristicNotPass() {
-        var barrier = barrierWithTotal(1, 0);
-        when(repo.findByCorrelationIdAndBatchIndex(anyString(), anyShort())).thenReturn(Optional.of(barrier));
-
-        var taskCommand = buildTaskCommand(TaskStatus.COMPLETED, 0);
-        // Overwrite the happy-path taskFlowResponse with a status=fail
-        // characteristic — simulates a downstream returning business-level
-        // failure under a COMPLETED envelope.
-        taskCommand.getResult().setTaskFlowResponse(TaskFlow.builder()
-                .id("tf-1")
-                .href("http://mock/tf-1")
-                .characteristic(List.of(
-                        ProcessFlow.Characteristic.builder()
-                                .name("status").value("fail").build()))
-                .build());
-        service.applyTaskEvent(taskCommand);
-
-        assertThat(barrier.getStatus()).isEqualTo(BarrierStatus.FAILED);
-        assertThat(barrier.getTaskCompleted()).isZero();
-        verify(tmf701).patchProcessFlowState(anyString(), eq("failed"));
-    }
-
-    @Test
-    void applyTaskEvent_completed_acceptsWhenTaskFlowResponseMissing() {
-        // detectKickout returns "no kickout" when the taskFlowResponse is
-        // absent — the envelope-level COMPLETED is trusted. The PATCH
-        // relatedEntity is skipped (no href to send) but the barrier still
-        // advances.
-        var barrier = barrierWithTotal(1, 0);
-        when(repo.findByCorrelationIdAndBatchIndex(anyString(), anyShort())).thenReturn(Optional.of(barrier));
-        when(dagRegistry.find("TestDAG")).thenReturn(Optional.of(dagWithBatches(1)));
-
-        var taskCommand = buildTaskCommand(TaskStatus.COMPLETED, 0);
-        taskCommand.getResult().setTaskFlowResponse(null);
-        service.applyTaskEvent(taskCommand);
-
-        assertThat(barrier.getStatus()).isEqualTo(BarrierStatus.CLOSED);
-        assertThat(barrier.getTaskCompleted()).isEqualTo(1);
-    }
-
-    @Test
-    void promoteNextBatch_kicksOutIfBatchHasFailedTaskExecution() {
-        // Per-batch defensive sweep: even when handleCompleted's per-action
-        // check passes, the batch-wide scan in promoteNextBatch catches any
-        // TaskExecution row that landed FAILED — and kicks out the flow
-        // instead of seeding the next batch.
-        var barrier = barrierWithTotal(1, 0);
-        when(repo.findByCorrelationIdAndBatchIndex(anyString(), anyShort())).thenReturn(Optional.of(barrier));
-        // dagRegistry is NOT stubbed here — the per-batch kickout sweep returns
-        // before DAG lookup, so stubbing would be dead code (lenient or removed).
-
-        var failedExec = new ca.siva.orchestrator.entity.TaskExecution();
-        failedExec.setId(new ca.siva.orchestrator.entity.TaskExecutionId("corr-1", "tf-1"));
-        failedExec.setActionName("badAction");
-        failedExec.setStatus(TaskStatus.FAILED);
-        when(taskExecutionRepo.findAllByCorrelationIdAndBatchIndex(eq("corr-1"), eq((short) 0)))
-                .thenReturn(List.of(failedExec));
+        BatchResults snapshot = emptyBatchResults();
+        when(batchResultsLoader.load(eq("corr-1"), eq((short) 0))).thenReturn(snapshot);
+        when(kickoutEvaluator.evaluate(snapshot))
+                .thenReturn(Optional.of("actionResponse.taskFlowResponse.taskStatus=Failed"));
 
         service.applyTaskEvent(buildTaskCommand(TaskStatus.COMPLETED, 0));
 
-        // Barrier batch 0 still closed (per-action path was clean), but flow
-        // is kicked out — processFlow PATCHed failed, no next batch seeded.
-        verify(tmf701).patchProcessFlowState(anyString(), eq("failed"));
+        assertThat(barrier.getStatus()).isEqualTo(BarrierStatus.FAILED);
+        // taskCompleted DID advance — the evaluator (not the in-memory
+        // counter) is the kickout authority.
+        assertThat(barrier.getTaskCompleted()).isEqualTo(1);
+        verify(completion).patchFailed(eq("corr-1"), eq(snapshot.responses()));
         verify(taskEventsPublisher).publishFailed(anyString(), anyString());
-        verify(taskCommandFactory, never())
-                .buildTaskExecute(anyString(), anyString(), any(), any(), any(), any());
+        verify(batchResultsLoader, times(1)).load(anyString(), anyShort());
+    }
+
+    @Test
+    void applyTaskEvent_completed_kickout_deferredUntilBatchCloses() {
+        // Deferred-decision contract: a 2-task batch sees one action come
+        // back COMPLETED. handleCompleted bumps taskCompleted, the barrier
+        // stays OPEN, pending stays at 1, and NEITHER the loader NOR the
+        // evaluator is invoked until the sibling reports in. No final-state
+        // PATCH is dispatched.
+        var barrier = barrierWithTotal(2, 0);
+        when(repo.findByCorrelationIdAndBatchIndex(anyString(), anyShort())).thenReturn(Optional.of(barrier));
+
+        service.applyTaskEvent(buildTaskCommand(TaskStatus.COMPLETED, 0));
+
+        assertThat(barrier.getStatus()).isEqualTo(BarrierStatus.OPEN);
+        assertThat(barrier.getTaskCompleted()).isEqualTo(1);
+        assertThat(barrier.getTaskFailed()).isZero();
+        verify(completion, never()).patchFailed(anyString(), any());
+        verify(completion, never()).patchCompleted(anyString(), any());
+        verifyNoInteractions(batchResultsLoader, kickoutEvaluator);
+    }
+
+    @Test
+    void applyTaskEvent_completed_cleanBatch_promotesFinalPatchWithSameResponses() {
+        // Clean batch closes — completion.patchCompleted receives the SAME
+        // responses list the evaluator decided "no kickout" against. Asserts
+        // the single-load contract: the in-memory snapshot is reused for
+        // the final-state PATCH instead of triggering a second DB scan.
+        var barrier = barrierWithTotal(1, 0);
+        when(repo.findByCorrelationIdAndBatchIndex(anyString(), anyShort())).thenReturn(Optional.of(barrier));
+        when(dagRegistry.find("TestDAG")).thenReturn(Optional.of(dagWithBatches(1)));
+        BatchResults snapshot = emptyBatchResults();
+        when(batchResultsLoader.load(eq("corr-1"), eq((short) 0))).thenReturn(snapshot);
+        when(kickoutEvaluator.evaluate(snapshot)).thenReturn(Optional.empty());
+
+        service.applyTaskEvent(buildTaskCommand(TaskStatus.COMPLETED, 0));
+
+        verify(completion).patchCompleted(eq("corr-1"), eq(snapshot.responses()));
+        verify(batchResultsLoader, times(1)).load(anyString(), anyShort());
     }
 }

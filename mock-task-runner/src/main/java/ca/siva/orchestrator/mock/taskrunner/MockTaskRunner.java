@@ -3,6 +3,7 @@ package ca.siva.orchestrator.mock.taskrunner;
 import ca.siva.orchestrator.domain.ExecutionMode;
 import ca.siva.orchestrator.domain.MessageName;
 import ca.siva.orchestrator.domain.MessageType;
+import ca.siva.orchestrator.domain.ProcessFlowStateType;
 import ca.siva.orchestrator.domain.Sources;
 import ca.siva.orchestrator.domain.TaskStatus;
 import ca.siva.orchestrator.dto.ActionResponse;
@@ -11,7 +12,7 @@ import ca.siva.orchestrator.dto.TaskCommand.Action;
 import ca.siva.orchestrator.dto.TaskCommand.AwaitingSignal;
 import ca.siva.orchestrator.dto.TaskCommand.Batch;
 import ca.siva.orchestrator.dto.TaskCommand.Execution;
-import ca.siva.orchestrator.dto.tmf.ProcessFlow;
+import ca.siva.orchestrator.dto.tmf.ProcessFlow.Characteristic;
 import ca.siva.orchestrator.dto.tmf.TaskFlow;
 import ca.siva.orchestrator.kafka.TaskCommandFactory;
 import ca.siva.orchestrator.kafka.TaskCommandPublisher;
@@ -52,8 +53,12 @@ public class MockTaskRunner {
     private static final String TYPE_TASK_FLOW = "TaskFlow";
     private static final String STATUS_COMPLETED = "COMPLETED";
     private static final String STATUS_WAITING = "WAITING";
-    /** TMF-701 taskFlow lifecycle states written into {@code taskFlowResponse.state}. */
-    private static final String STATE_COMPLETED    = "completed";
+    /**
+     * TMF-701 taskFlow lifecycle states written into {@code taskFlowResponse.state}.
+     * Sourced from {@link ProcessFlowStateType} so the wire vocabulary is
+     * defined in exactly one place across the codebase.
+     */
+    private static final String STATE_COMPLETED    = ProcessFlowStateType.COMPLETED.getValue();
     private static final String STATE_ACKNOWLEDGED = "acknowledged";
     private static final String UNKNOWN = "unknown";
 
@@ -214,7 +219,7 @@ public class MockTaskRunner {
      *       HTTP/Kafka response).</li>
      *   <li>{@code taskFlowResponse} — typed TMF-701 {@link TaskFlow}; domain outputs
      *       ({@code status}, {@code diagnosticSummary}, …) are emitted as
-     *       {@link ProcessFlow.Characteristic} name/value pairs per TMF convention.</li>
+     *       {@link Characteristic} name/value pairs per TMF convention.</li>
      * </ul>
      */
     private static ActionResponse buildActionResponse(String actionName, String actionCode,
@@ -239,23 +244,23 @@ public class MockTaskRunner {
     }
 
     /**
-     * Flattens a downstream result map into TMF-701 {@link ProcessFlow.Characteristic}
+     * Flattens a downstream result map into TMF-701 {@link Characteristic}
      * entries. Preserves insertion order and stringifies values — matching the
      * TMF convention that characteristic values are strings with an optional
      * {@code valueType}.
      */
-    private static List<ProcessFlow.Characteristic> toCharacteristics(Map<String, Object> downstreamResult) {
+    private static List<Characteristic> toCharacteristics(Map<String, Object> downstreamResult) {
         if (downstreamResult == null || downstreamResult.isEmpty()) {
             return List.of();
         }
-        List<ProcessFlow.Characteristic> out = new ArrayList<>(downstreamResult.size());
+        List<Characteristic> out = new ArrayList<>(downstreamResult.size());
         for (Entry<String, Object> e : downstreamResult.entrySet()) {
             Object v = e.getValue();
-            out.add(ProcessFlow.Characteristic.builder()
-                    .name(e.getKey())
-                    .value(v == null ? null : v.toString())
-                    .valueType(v == null ? null : v.getClass().getSimpleName())
-                    .build());
+            Characteristic c = new Characteristic();
+            c.setName(e.getKey());
+            c.setValue(v == null ? null : v.toString());
+            c.setValueType(v == null ? null : v.getClass().getSimpleName());
+            out.add(c);
         }
         return out;
     }

@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ruleset name="task-orchestrator-sonar-equivalent"
+         xmlns="http://pmd.sourceforge.net/ruleset/2.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://pmd.sourceforge.net/ruleset/2.0.0
+                             https://pmd.sourceforge.io/ruleset_2_0_0.xsd">
+
+    <description>
+        Curated PMD ruleset that mirrors the SonarQube "Sonar way" rules
+        most commonly flagged on Spring Boot codebases:
+        - Unused imports / fields / methods / locals / params  (squid:S1144 / S1481 / S1068)
+        - Empty catch / empty methods                          (squid:S108 / S1186)
+        - System.out.println in production code                (squid:S106)
+        - Commented-out code                                   (squid:S125)
+        - Magic numbers (loose threshold)                      (squid:S109)
+    </description>
+
+    <!-- Dead-code detection (the "remove all unused code" ask). -->
+    <rule ref="category/java/bestpractices.xml/UnusedPrivateField"/>
+    <!--
+        PMD 7.0.0's UnusedPrivateMethod has a known false-positive against
+        generic private methods (e.g. <T> T executeWithRetry(...)) and
+        methods invoked exclusively from lambda bodies — both patterns
+        appear throughout this codebase (Spring Retry helpers + post-commit
+        Runnables). Re-enable once PMD ships the fix tracked in
+        https://github.com/pmd/pmd/issues/4569 .
+    -->
+    <!-- <rule ref="category/java/bestpractices.xml/UnusedPrivateMethod"/> -->
+    <rule ref="category/java/bestpractices.xml/UnusedLocalVariable"/>
+    <rule ref="category/java/bestpractices.xml/UnusedFormalParameter">
+        <properties>
+            <!-- Spring controllers, JPA callbacks, etc. legitimately keep
+                 unused params for framework signature contracts. -->
+            <property name="checkAll" value="false"/>
+        </properties>
+    </rule>
+    <!--
+        UnusedAssignment misfires on Java records' canonical constructor
+        bodies (e.g. `requiredActionNames = requiredActionNames == null ? ...`)
+        — PMD treats the reassignment as a write-then-discard, but the
+        compact-constructor reassignment IS the canonical field set. This
+        codebase normalises @ConfigurationProperties record params heavily,
+        so the rule produces only false positives here.
+    -->
+    <!-- <rule ref="category/java/bestpractices.xml/UnusedAssignment"/> -->
+
+    <!-- Imports. -->
+    <rule ref="category/java/codestyle.xml/UnnecessaryImport"/>
+
+    <!-- Empty / no-op constructs (EmptyControlStatement covers if/while/for/finally in PMD 7). -->
+    <rule ref="category/java/errorprone.xml/EmptyCatchBlock"/>
+    <rule ref="category/java/codestyle.xml/EmptyControlStatement"/>
+
+    <!-- Logging hygiene. -->
+    <rule ref="category/java/bestpractices.xml/SystemPrintln"/>
+
+    <!-- Common bug patterns SonarQube also flags. -->
+    <rule ref="category/java/errorprone.xml/AvoidCatchingNPE"/>
+    <rule ref="category/java/errorprone.xml/CompareObjectsWithEquals"/>
+    <rule ref="category/java/errorprone.xml/EqualsNull"/>
+    <rule ref="category/java/errorprone.xml/UseEqualsToCompareStrings"/>
+
+    <!-- Performance. -->
+    <rule ref="category/java/performance.xml/AvoidArrayLoops"/>
+    <rule ref="category/java/performance.xml/UseStringBufferForStringAppends"/>
+
+</ruleset>

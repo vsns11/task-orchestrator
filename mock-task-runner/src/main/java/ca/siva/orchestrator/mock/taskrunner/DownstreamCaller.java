@@ -53,7 +53,7 @@ public class DownstreamCaller {
                 if (statusCode >= 200 && statusCode < 300) {
                     // Success — return a realistic refined response
                     log.debug("Downstream call for {} succeeded on attempt {}", actionName, attempt);
-                    return buildRefinedResponse(actionName, downstreamUrl);
+                    return buildRefinedResponse(actionName);
                 }
 
                 if (retryProperties.getRetryableStatusCodes().contains(statusCode)) {
@@ -91,7 +91,7 @@ public class DownstreamCaller {
      * <p>In production, this is the actual HTTP response body from the downstream
      * service (diagnostics engine, notification gateway, etc.).</p>
      */
-    private Map<String, Object> buildRefinedResponse(String actionName, String downstreamUrl) {
+    private Map<String, Object> buildRefinedResponse(String actionName) {
         return Map.of(
                 "status", "pass",
                 "diagnosticSummary", "All checks passed for " + actionName,

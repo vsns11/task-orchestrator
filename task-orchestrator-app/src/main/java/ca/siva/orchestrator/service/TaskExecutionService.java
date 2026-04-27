@@ -94,7 +94,9 @@ public class TaskExecutionService {
      * truncating here.
      */
     private String serialize(Object payload) {
-        if (payload == null) return null;
+        if (payload == null) {
+            return null;
+        }
         try {
             return mapper.writeValueAsString(payload);
         } catch (JsonProcessingException e) {
@@ -111,7 +113,9 @@ public class TaskExecutionService {
 
     /** Minimal JSON-string escape for the serialization-failure marker. */
     private static String escapeJson(String s) {
-        if (s == null) return "";
+        if (s == null) {
+            return "";
+        }
         return s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", " ").replace("\r", " ");
     }
 }

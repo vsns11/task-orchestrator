@@ -3,6 +3,7 @@ package ca.siva.orchestrator.client;
 import ca.siva.orchestrator.config.FidCredentialsProperties;
 import ca.siva.orchestrator.config.HttpClientProperties;
 import ca.siva.orchestrator.config.Tmf701Properties;
+import ca.siva.orchestrator.domain.ProcessFlowStateType;
 import ca.siva.orchestrator.dto.tmf.ProcessFlow;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -113,6 +114,11 @@ class Tmf701ClientTest {
 
     @Test
     void addTaskFlowRef_preservesExistingRelatedEntity_andAppendsNewOne() throws Exception {
+        // GET returns a processFlow with one pre-existing relatedEntity and
+        // no taskFlow array yet — the merge should preserve relatedEntity,
+        // append the new ref to it, AND seed the taskFlow array with the new
+        // TaskFlowRef carrying actionName as @referredType (legacy
+        // enrichProcessFlow contract).
         String getResponse = """
                 {
                   "id":"pf-42",
@@ -132,6 +138,7 @@ class Tmf701ClientTest {
               .andExpect(content().contentType(MERGE_PATCH_JSON))
               .andExpect(request -> {
                   JsonNode body = mapper.readTree(((org.springframework.mock.http.client.MockClientHttpRequest) request).getBodyAsBytes());
+
                   JsonNode rel  = body.path("relatedEntity");
                   assertThat(rel.isArray()).isTrue();
                   assertThat(rel).hasSize(2);
@@ -140,7 +147,23 @@ class Tmf701ClientTest {
                   assertThat(rel.get(1).path("href").asText()).isEqualTo(TASK_FLOW_HREF);
                   assertThat(rel.get(1).path("role").asText()).isEqualTo("TaskFlow");
                   assertThat(rel.get(1).path("name").asText()).isEqualTo(ACTION_NAME);
-                  // NON_NULL on ProcessFlow: only relatedEntity should be on the wire.
+
+                  // NEW — the typed taskFlow[] array must also be populated
+                  // with the new TaskFlowRef, mirroring the legacy
+                  // processFlow.addTaskFlowItem(buildTaskFlow(...)) call.
+                  JsonNode tf = body.path("taskFlow");
+                  assertThat(tf.isArray()).isTrue();
+                  assertThat(tf).hasSize(1);
+                  assertThat(tf.get(0).path("id").asText()).isEqualTo(TASK_FLOW_ID);
+                  assertThat(tf.get(0).path("href").asText()).isEqualTo(TASK_FLOW_HREF);
+                  // @referredType carries the actionName per the legacy
+                  // buildTaskFlow(tf.getId(), atReferredType, tf.getHref(), ...)
+                  // signature where atReferredType is the per-call action name.
+                  assertThat(tf.get(0).path("@referredType").asText()).isEqualTo(ACTION_NAME);
+
+                  // NON_NULL on ProcessFlow: only the two arrays should be
+                  // on the wire — state / id are not mutated by the mid-flow
+                  // taskFlow append.
                   assertThat(body.has("state")).isFalse();
                   assertThat(body.has("id")).isFalse();
               })
@@ -153,12 +176,17 @@ class Tmf701ClientTest {
     }
 
     @Test
-    void addTaskFlowRef_duplicateTaskFlowId_notAppendedAgain() throws Exception {
+    void addTaskFlowRef_preservesExistingTaskFlowArray_andAppendsNewOne() throws Exception {
+        // The GET snapshot already has ONE pre-existing taskFlow ref. The
+        // merge must preserve it and append the new one — proves the
+        // taskFlow[] read-modify-write mirrors the relatedEntity[] one and
+        // doesn't accidentally clobber prior tasks under merge-patch
+        // (RFC 7396) array-replace semantics.
         String getResponse = """
                 {
                   "id":"pf-42",
-                  "relatedEntity":[
-                    {"id":"tf-new","href":"http://tmf701/taskFlow/tf-new","role":"TaskFlow","@type":"RelatedEntity"}
+                  "taskFlow":[
+                    {"id":"tf-old","href":"http://tmf701/taskFlow/tf-old","@referredType":"InternetDiagnostic"}
                   ]
                 }
                 """;
@@ -171,11 +199,55 @@ class Tmf701ClientTest {
               .andExpect(method(HttpMethod.PATCH))
               .andExpect(content().contentType(MERGE_PATCH_JSON))
               .andExpect(request -> {
-                  JsonNode rel = mapper.readTree(((org.springframework.mock.http.client.MockClientHttpRequest) request).getBodyAsBytes())
-                                        .path("relatedEntity");
-                  // Idempotency: still exactly one entry, not two.
+                  JsonNode body = mapper.readTree(((org.springframework.mock.http.client.MockClientHttpRequest) request).getBodyAsBytes());
+                  JsonNode tf = body.path("taskFlow");
+                  assertThat(tf.isArray()).isTrue();
+                  assertThat(tf).hasSize(2);
+                  assertThat(tf.get(0).path("id").asText()).isEqualTo("tf-old");
+                  assertThat(tf.get(0).path("@referredType").asText()).isEqualTo("InternetDiagnostic");
+                  assertThat(tf.get(1).path("id").asText()).isEqualTo(TASK_FLOW_ID);
+                  assertThat(tf.get(1).path("@referredType").asText()).isEqualTo(ACTION_NAME);
+              })
+              .andRespond(withStatus(HttpStatus.NO_CONTENT));
+
+        client.patchProcessFlowAddTaskFlowRef(
+                PROCESS_FLOW_ID, TASK_FLOW_ID, TASK_FLOW_HREF, ACTION_NAME);
+
+        server.verify();
+    }
+
+    @Test
+    void addTaskFlowRef_duplicateTaskFlowId_notAppendedAgain() throws Exception {
+        // Both arrays already contain the incoming id — neither should grow
+        // on the redelivered call (idempotency on both arrays in lock-step).
+        String getResponse = """
+                {
+                  "id":"pf-42",
+                  "relatedEntity":[
+                    {"id":"tf-new","href":"http://tmf701/taskFlow/tf-new","role":"TaskFlow","@type":"RelatedEntity"}
+                  ],
+                  "taskFlow":[
+                    {"id":"tf-new","href":"http://tmf701/taskFlow/tf-new","@referredType":"passwordPushV2"}
+                  ]
+                }
+                """;
+
+        server.expect(ExpectedCount.once(), requestTo(EXPECTED_URL))
+              .andExpect(method(HttpMethod.GET))
+              .andRespond(withSuccess(getResponse, MediaType.APPLICATION_JSON));
+
+        server.expect(ExpectedCount.once(), requestTo(EXPECTED_URL))
+              .andExpect(method(HttpMethod.PATCH))
+              .andExpect(content().contentType(MERGE_PATCH_JSON))
+              .andExpect(request -> {
+                  JsonNode body = mapper.readTree(((org.springframework.mock.http.client.MockClientHttpRequest) request).getBodyAsBytes());
+                  JsonNode rel = body.path("relatedEntity");
+                  JsonNode tf  = body.path("taskFlow");
+                  // Idempotency on BOTH arrays: still exactly one entry each.
                   assertThat(rel).hasSize(1);
                   assertThat(rel.get(0).path("id").asText()).isEqualTo(TASK_FLOW_ID);
+                  assertThat(tf).hasSize(1);
+                  assertThat(tf.get(0).path("id").asText()).isEqualTo(TASK_FLOW_ID);
               })
               .andRespond(withStatus(HttpStatus.NO_CONTENT));
 
@@ -188,8 +260,9 @@ class Tmf701ClientTest {
     @Test
     void addTaskFlowRef_getFails_stillPatchesWithNewEntryAlone() throws Exception {
         // GET returns 500 — we should not lose this taskFlow ref; fall back
-        // to PATCHing with just the new entry (previously-attached siblings
-        // are sacrificed in this rare failure path).
+        // to PATCHing with just the new entries on BOTH arrays
+        // (previously-attached siblings on either array are sacrificed in
+        // this rare failure path).
         server.expect(ExpectedCount.once(), requestTo(EXPECTED_URL))
               .andExpect(method(HttpMethod.GET))
               .andRespond(withStatus(HttpStatus.INTERNAL_SERVER_ERROR));
@@ -198,16 +271,44 @@ class Tmf701ClientTest {
               .andExpect(method(HttpMethod.PATCH))
               .andExpect(content().contentType(MERGE_PATCH_JSON))
               .andExpect(request -> {
-                  JsonNode rel = mapper.readTree(((org.springframework.mock.http.client.MockClientHttpRequest) request).getBodyAsBytes())
-                                        .path("relatedEntity");
+                  JsonNode body = mapper.readTree(((org.springframework.mock.http.client.MockClientHttpRequest) request).getBodyAsBytes());
+                  JsonNode rel = body.path("relatedEntity");
+                  JsonNode tf  = body.path("taskFlow");
                   assertThat(rel).hasSize(1);
                   assertThat(rel.get(0).path("id").asText()).isEqualTo(TASK_FLOW_ID);
+                  assertThat(tf).hasSize(1);
+                  assertThat(tf.get(0).path("id").asText()).isEqualTo(TASK_FLOW_ID);
+                  assertThat(tf.get(0).path("@referredType").asText()).isEqualTo(ACTION_NAME);
               })
               .andRespond(withStatus(HttpStatus.NO_CONTENT));
 
         client.patchProcessFlowAddTaskFlowRef(
                 PROCESS_FLOW_ID, TASK_FLOW_ID, TASK_FLOW_HREF, ACTION_NAME);
 
+        server.verify();
+    }
+
+    @Test
+    void addTaskFlowRef_blankActionName_taskFlowReferredTypeFallsBackToDefault() throws Exception {
+        // actionName blank/null → taskFlow.@referredType falls back to the
+        // "TaskFlow" default so the field is never sent empty (TMF-701
+        // schema requires it on TaskFlowRef).
+        server.expect(ExpectedCount.once(), requestTo(EXPECTED_URL))
+              .andExpect(method(HttpMethod.GET))
+              .andRespond(withSuccess("{\"id\":\"pf-42\"}", MediaType.APPLICATION_JSON));
+
+        server.expect(ExpectedCount.once(), requestTo(EXPECTED_URL))
+              .andExpect(method(HttpMethod.PATCH))
+              .andExpect(content().contentType(MERGE_PATCH_JSON))
+              .andExpect(request -> {
+                  JsonNode tf = mapper.readTree(((org.springframework.mock.http.client.MockClientHttpRequest) request).getBodyAsBytes())
+                                       .path("taskFlow");
+                  assertThat(tf).hasSize(1);
+                  assertThat(tf.get(0).path("@referredType").asText()).isEqualTo("TaskFlow");
+              })
+              .andRespond(withStatus(HttpStatus.NO_CONTENT));
+
+        client.patchProcessFlowAddTaskFlowRef(PROCESS_FLOW_ID, TASK_FLOW_ID, TASK_FLOW_HREF, "  ");
         server.verify();
     }
 
@@ -242,7 +343,7 @@ class Tmf701ClientTest {
               })
               .andRespond(withStatus(HttpStatus.NO_CONTENT));
 
-        client.patchProcessFlowState(PROCESS_FLOW_ID, "completed");
+        client.patchProcessFlowState(PROCESS_FLOW_ID, ProcessFlowStateType.COMPLETED);
 
         server.verify();
     }
@@ -254,7 +355,7 @@ class Tmf701ClientTest {
               .andRespond(withStatus(HttpStatus.INTERNAL_SERVER_ERROR));
 
         // Orchestration must not throw on TMF-701 hiccups.
-        assertThatCode(() -> client.patchProcessFlowState(PROCESS_FLOW_ID, "failed"))
+        assertThatCode(() -> client.patchProcessFlowState(PROCESS_FLOW_ID, ProcessFlowStateType.FAILED))
                 .doesNotThrowAnyException();
 
         server.verify();

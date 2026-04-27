@@ -5,6 +5,8 @@ import ca.siva.orchestrator.domain.MessageType;
 import ca.siva.orchestrator.domain.Sources;
 import ca.siva.orchestrator.dto.TaskCommand;
 import ca.siva.orchestrator.dto.tmf.ProcessFlow;
+import ca.siva.orchestrator.dto.tmf.ProcessFlow.Characteristic;
+import ca.siva.orchestrator.dto.tmf.ProcessFlow.RelatedEntity;
 import ca.siva.orchestrator.entity.BatchBarrier;
 import ca.siva.orchestrator.entity.TaskExecution;
 import ca.siva.orchestrator.kafka.TaskCommandFactory;
@@ -86,7 +88,7 @@ public class DemoFlowTrigger {
                 .channel(List.of())
                 .relatedParty(List.of())
                 .relatedEntity(List.of(
-                        ProcessFlow.RelatedEntity.builder()
+                        RelatedEntity.builder()
                                 .id("B54CCE7C0E0840FF86689103A")
                                 .href("https://sharp-oneside-task/onesideTaskCatalog/findServiceDiagnosticFromCacheByTransactionId/B54CCE7C0E0840FF86689103A")
                                 .name("Internet Service Diagnostic")
@@ -96,15 +98,9 @@ public class DemoFlowTrigger {
                                 .build()
                 ))
                 .characteristic(List.of(
-                        ProcessFlow.Characteristic.builder()
-                                .id("B54CCE7C0E0840FF86689103A").name("SDT Transaction ID")
-                                .value("").valueType("string").characteristicRelationship(List.of()).build(),
-                        ProcessFlow.Characteristic.builder()
-                                .id("N/A").name("internetSubscription")
-                                .value("").valueType("string").characteristicRelationship(List.of()).build(),
-                        ProcessFlow.Characteristic.builder()
-                                .id("EZ82449").name("peinNumber")
-                                .value("").valueType("string").characteristicRelationship(List.of()).build()
+                        buildCharacteristic("B54CCE7C0E0840FF86689103A", "SDT Transaction ID"),
+                        buildCharacteristic("N/A",                       "internetSubscription"),
+                        buildCharacteristic("EZ82449",                   "peinNumber")
                 ))
                 .processFlowSpecification(dagKey)
                 .build();
@@ -185,5 +181,22 @@ public class DemoFlowTrigger {
     @GetMapping("/tasks")
     public List<TaskExecution> tasks() {
         return taskRepo.findAll();
+    }
+
+    /**
+     * Constructs a string-typed processFlow {@link Characteristic} via setter
+     * mutation (no Lombok builder). Demo characteristics carry an empty
+     * {@code value} and an empty {@code characteristicRelationship} list — the
+     * downstream POPS/PAM consumers don't read these on the demo path; the
+     * fields exist only so the JSON shape matches the production payload.
+     */
+    private static Characteristic buildCharacteristic(String id, String name) {
+        Characteristic c = new Characteristic();
+        c.setId(id);
+        c.setName(name);
+        c.setValue("");
+        c.setValueType("string");
+        c.setCharacteristicRelationship(List.of());
+        return c;
     }
 }

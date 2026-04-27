@@ -2,6 +2,8 @@ package ca.siva.orchestrator.service;
 
 import ca.siva.orchestrator.client.Tmf701Client;
 import ca.siva.orchestrator.dag.DagDefinition;
+import ca.siva.orchestrator.dag.DagDefinition.ActionDef;
+import ca.siva.orchestrator.dag.DagDefinition.BatchDef;
 import ca.siva.orchestrator.dag.DagRegistry;
 import ca.siva.orchestrator.domain.BarrierStatus;
 import ca.siva.orchestrator.domain.TaskStatus;
@@ -42,16 +44,60 @@ import java.util.Optional;
  * next batch, the orchestrator fetches it from TMF-701 via GET API call.
  * This approach scales to any number of concurrent flows.</p>
  *
- * <p><b>Kickout</b> — the orchestrator validates every completed action's
- * {@link ActionResponse}. A response that reports a non-completed taskStatusCode
- * or a non-{@code pass} business outcome "kicks out" the whole flow:
- * the current barrier is marked failed, the TMF-701 processFlow is PATCHed
- * to {@code failed}, and a {@code flow.lifecycle} failed event is published.
- * Other open barriers on the same flow are left untouched — each one will
- * naturally close or time out under its own barrier lifecycle. Kickout runs
- * at two checkpoints — per-action inside {@link #handleCompleted} (primary)
- * and per-batch inside {@link #promoteNextBatch} (defensive sweep right
- * before promotion).</p>
+ * <h3>Per-event side effects (mid-flow)</h3>
+ * <p>Every COMPLETED / FAILED / CANCELLED task event triggers a TMF-701
+ * "ref-only" PATCH on the parent processFlow ({@link #patchParentProcessFlow})
+ * — appending an entry to BOTH {@code relatedEntity[]} and the typed
+ * {@code taskFlow[]} array (mirrors the legacy {@code enrichProcessFlow}
+ * contract that called {@code addRelatedEntityItem(...)} and
+ * {@code addTaskFlowItem(...)} in lock-step). The mid-flow PATCH body
+ * carries ONLY those two arrays — no {@code state}, no {@code characteristic},
+ * no {@code id}. Downstream consumers can follow the link before the flow as
+ * a whole has finished. Mid-flow events do NOT publish any FLOW_LIFECYCLE
+ * event and do NOT send the legacy-shape final-state PATCH. Both of those
+ * are reserved for end-of-flow / kickout transitions.</p>
+ *
+ * <h3>Kickout — single decision point at batch close</h3>
+ * <p>Kickout is evaluated exactly once per batch: when the barrier drains
+ * ({@code pending() == 0}) {@link BatchResultsLoader} reads every persisted
+ * {@link TaskExecution} row for that {@code (correlationId, batchIndex)}
+ * and parses each {@code result_json} payload into an {@link ActionResponse}.
+ * The same in-memory {@link BatchResults} snapshot is then handed to
+ * {@link BatchKickoutEvaluator#evaluate(BatchResults)} for the kickout
+ * decision and — on the kickout / end-of-flow paths — to
+ * {@link ProcessFlowCompletionService} for the final-state PATCH cascade.
+ * A row whose persisted status is {@code FAILED}/{@code CANCELLED}, or whose
+ * deserialized {@link ActionResponse} carries a {@code taskStatus}
+ * characteristic value other than {@code Passed}, fails the batch.</p>
+ * <p>The two outcomes:</p>
+ * <ul>
+ *   <li><b>Promote (mid-flow)</b> — clean batch with a next batch in the
+ *       DAG. {@link #closeBatchAndDecide} closes the barrier and calls
+ *       {@link #promoteNextBatch}, which seeds the next batch. No final-state
+ *       PATCH and no FLOW_LIFECYCLE event are fired here — the
+ *       {@code relatedEntity[]} / {@code taskFlow[]} entries accumulated by
+ *       per-event PATCHes remain on the server (merge-patch leaves them
+ *       alone).</li>
+ *   <li><b>End of flow</b> — clean batch with NO next batch in the DAG.
+ *       {@link #promoteNextBatch} dispatches the {@code state=completed}
+ *       final-state PATCH (with derived {@code processStatus} /
+ *       {@code statusChangeReason} characteristics) and publishes
+ *       FLOW_LIFECYCLE COMPLETED. This is the FIRST point a final-state
+ *       PATCH is sent on the happy path.</li>
+ *   <li><b>Kickout</b> — drained batch contains a FAILED / CANCELLED row or
+ *       a non-Passed taskStatus. Fail the barrier, dispatch the
+ *       {@code state=failed} final-state PATCH (with derived
+ *       {@code processStatus} / {@code statusChangeReason} characteristics),
+ *       and publish FLOW_LIFECYCLE FAILED. NO further batches are seeded.</li>
+ * </ul>
+ * <p><b>Strict separation of PATCH shapes.</b> The mid-flow ref PATCH and
+ * the final-state PATCH never overlap on the wire: the former carries only
+ * {@code relatedEntity[]} + {@code taskFlow[]}, the latter only {@code id} +
+ * {@code state} + {@code characteristic[]}. Each path is exclusive — a
+ * mid-flow event never updates {@code processStatus} / {@code statusChangeReason}
+ * and a final-state PATCH never re-touches the ref arrays.</p>
+ * <p>Persisting first / inspecting second eliminates an entire category of
+ * "in-memory counter says one thing, DB row says another" race conditions.</p>
  */
 @Slf4j
 @Service
@@ -60,28 +106,45 @@ public class BarrierService {
 
     // ---- constants ----
 
-    /** TMF-701 processFlow state values used in PATCH state updates. */
-    private static final String STATE_COMPLETED = "completed";
-    private static final String STATE_FAILED    = "failed";
-
-    /** ActionResponse taskStatusCode values — anything other than COMPLETED is treated as a failure. */
-    private static final String TASK_STATUS_COMPLETED = "COMPLETED";
-
-    /** Characteristic name carrying the pass/fail status on the TMF-701 TaskFlow response. */
-    private static final String STATUS_CHARACTERISTIC = "status";
-    /** Expected value of the {@code status} characteristic for a passing action. */
-    private static final String STATUS_PASS           = "pass";
+    /** Retry budget for the JPA-conflict retries on the public entry points. */
+    private static final int    RETRY_MAX_ATTEMPTS    = 5;
+    private static final long   RETRY_INITIAL_DELAY_MS = 100L;
+    private static final double RETRY_MULTIPLIER      = 2.0;
+    private static final long   RETRY_MAX_DELAY_MS    = 2000L;
 
     /** Unknown identifier used in log messages when a field is absent. */
     private static final String UNKNOWN = "?";
 
-    private final BatchBarrierRepository  repo;
-    private final TaskExecutionRepository taskExecutionRepo;
-    private final DagRegistry             dagRegistry;
-    private final TaskCommandFactory      taskCommandFactory;
-    private final TaskCommandPublisher    publisher;
-    private final Tmf701Client            tmf701;
-    private final TaskEventsPublisher     taskCommandsPublisher;
+    private final BatchBarrierRepository       repo;
+    private final TaskExecutionRepository      taskExecutionRepo;
+    private final DagRegistry                  dagRegistry;
+    private final TaskCommandFactory           taskCommandFactory;
+    private final TaskCommandPublisher         publisher;
+    private final Tmf701Client                 tmf701;
+    private final TaskEventsPublisher          taskCommandsPublisher;
+    /**
+     * Builds and dispatches the legacy-shape final-state PATCH (id + state +
+     * processStatus / statusChangeReason characteristics) at flow end. The
+     * mid-flow {@code relatedEntity[]} / {@code taskFlow[]} ref-only PATCHes
+     * still go through {@link Tmf701Client} directly — the completion service
+     * is invoked ONLY when the barrier has drained AND there is no next batch
+     * (happy end-of-flow) or a kickout has been detected on the closing
+     * batch. It is never invoked on a per-action basis.
+     */
+    private final ProcessFlowCompletionService completion;
+    /**
+     * Single-responsibility owner of the kickout decision. Inspects every
+     * persisted {@link TaskExecution} for the batch and returns a non-empty
+     * reason when the batch should fail instead of promote.
+     */
+    private final BatchKickoutEvaluator        kickoutEvaluator;
+    /**
+     * Single-trip loader for a batch's persisted task-execution rows + their
+     * already-deserialized action responses. Owned at this layer so the same
+     * snapshot drives the kickout decision AND the final-state PATCH cascade
+     * — one DB query, one parse pass per batch close.
+     */
+    private final BatchResultsLoader           batchResultsLoader;
 
     /**
      * Seeds the first batch barrier and publishes task.execute commands
@@ -92,10 +155,12 @@ public class BarrierService {
      * @param processFlow   the typed processFlow object from the initiated event
      */
     @Retryable(retryFor = {OptimisticLockingFailureException.class, DataIntegrityViolationException.class},
-               maxAttempts = 5, backoff = @Backoff(delay = 100, multiplier = 2, maxDelay = 2000))
+               maxAttempts = RETRY_MAX_ATTEMPTS,
+               backoff = @Backoff(delay = RETRY_INITIAL_DELAY_MS,
+                                  multiplier = RETRY_MULTIPLIER,
+                                  maxDelay = RETRY_MAX_DELAY_MS))
     @Transactional
-    public void initiateFlow(String correlationId, String dagKey,
-                             ProcessFlow processFlow) {
+    public void initiateFlow(String correlationId, String dagKey, ProcessFlow processFlow) {
         Optional<DagDefinition> dagLookup = dagRegistry.find(dagKey);
         if (dagLookup.isEmpty()) {
             log.warn("Unknown dagKey={} for flow={} — skipping", dagKey, correlationId);
@@ -103,7 +168,7 @@ public class BarrierService {
         }
         DagDefinition dag = dagLookup.get();
 
-        Optional<DagDefinition.BatchDef> firstBatch = dag.batch(0);
+        Optional<BatchDef> firstBatch = dag.batch(0);
         if (firstBatch.isEmpty()) {
             log.warn("DAG {} has no batch 0 — skipping flow={}", dagKey, correlationId);
             return;
@@ -131,7 +196,10 @@ public class BarrierService {
      * the DAG when a batch completes.
      */
     @Retryable(retryFor = {OptimisticLockingFailureException.class, DataIntegrityViolationException.class},
-               maxAttempts = 5, backoff = @Backoff(delay = 100, multiplier = 2, maxDelay = 2000))
+               maxAttempts = RETRY_MAX_ATTEMPTS,
+               backoff = @Backoff(delay = RETRY_INITIAL_DELAY_MS,
+                                  multiplier = RETRY_MULTIPLIER,
+                                  maxDelay = RETRY_MAX_DELAY_MS))
     @Transactional
     public void applyTaskEvent(TaskCommand taskCommand) {
         TaskStatus status = taskCommand.getStatus();
@@ -166,9 +234,25 @@ public class BarrierService {
 
     // ---- internal handlers ----
 
+    /**
+     * Records a COMPLETED task event against its batch barrier. NO kickout
+     * decision is taken here — the per-action {@link ActionResponse} is
+     * already persisted on the {@code task_execution} row by
+     * {@link TaskExecutionService}, and the kickout sweep at batch close
+     * ({@link #closeBatchAndDecide}) is the single place that inspects the
+     * batch's persisted responses.
+     *
+     * <p>Side effects of a mid-flow COMPLETED event:</p>
+     * <ol>
+     *   <li>Schedule a relatedEntity PATCH on the parent processFlow — runs
+     *       AFTER the DB transaction commits so we never hold a HikariCP
+     *       connection open across the HTTP call.</li>
+     *   <li>Increment {@code taskCompleted} on the barrier. When
+     *       {@code pending() == 0} the batch drains and
+     *       {@link #closeBatchAndDecide} runs the kickout sweep.</li>
+     * </ol>
+     */
     private void handleCompleted(TaskCommand taskCommand, String correlationId, short batchIndex) {
-        // Defer the TMF-701 PATCH (blocking HTTP) until after the DB transaction commits.
-        // Holding a DB connection during an HTTP call can exhaust HikariCP under load.
         runAfterCommit(() -> patchParentProcessFlow(taskCommand, correlationId));
 
         Optional<BatchBarrier> barrierLookup = repo.findByCorrelationIdAndBatchIndex(correlationId, batchIndex);
@@ -184,34 +268,32 @@ public class BarrierService {
             return;
         }
 
-        // Kickout (per-action): even though the task-runner reports completed,
-        // the business status inside actionResponse may indicate failure. Kick
-        // out the whole flow so no further batches are seeded for a flow that
-        // already produced a bad downstream response.
-        Optional<String> kickoutReason = detectKickout(taskCommand);
-        if (kickoutReason.isPresent()) {
-            kickoutFlow(correlationId, barrier,
-                    "action " + actionName(taskCommand) + " kicked out: " + kickoutReason.get());
-            return;
-        }
-
         barrier.incCompleted();
         log.info("Barrier flow={} batch={}: completed={} failed={} pending={}",
                 correlationId, batchIndex, barrier.getTaskCompleted(),
                 barrier.getTaskFailed(), barrier.pending());
 
         if (barrier.pending() == 0) {
-            barrier.close();
-            repo.save(barrier);
-            log.info("Batch {} closed for flow={}", batchIndex, correlationId);
-            promoteNextBatch(correlationId, barrier.getDagKey(), batchIndex);
+            closeBatchAndDecide(barrier, correlationId, batchIndex);
         } else {
             repo.save(barrier);
         }
     }
 
+    /**
+     * Records a FAILED / CANCELLED task event against its batch barrier.
+     *
+     * <p>Retryable failures bypass every counter — the task-runner will
+     * redrive the action and the eventual COMPLETED/FAILED outcome is what
+     * advances the barrier. Bumping {@code taskFailed} on a retryable
+     * failure would fake a draining batch and trigger a premature kickout.</p>
+     *
+     * <p>Non-retryable failures bump {@code taskFailed} (so {@code pending()}
+     * sees one fewer outstanding task) and, when the batch drains, defer to
+     * {@link #closeBatchAndDecide} — which inspects the persisted rows and
+     * fails the flow at that single decision point.</p>
+     */
     private void handleFailed(TaskCommand taskCommand, String correlationId, short batchIndex) {
-        // Defer the TMF-701 PATCH (blocking HTTP) until after the DB transaction commits.
         runAfterCommit(() -> patchParentProcessFlow(taskCommand, correlationId));
 
         Optional<BatchBarrier> barrierLookup = repo.findByCorrelationIdAndBatchIndex(correlationId, batchIndex);
@@ -227,42 +309,84 @@ public class BarrierService {
             return;
         }
 
-        barrier.incFailed();
         boolean retryable = Optional.ofNullable(taskCommand.getError())
                 .map(TaskCommand.ErrorInfo::getRetryable)
                 .orElse(false);
 
-        if (!retryable) {
-            barrier.fail();
-            repo.save(barrier);
-            log.error("Batch {} failed for flow={} (action={} non-retryable)",
-                    batchIndex, correlationId, actionName(taskCommand));
-            runAfterCommit(() -> {
-                tmf701.patchProcessFlowState(correlationId, STATE_FAILED);
-                taskCommandsPublisher.publishFailed(correlationId,
-                        "action " + actionName(taskCommand) + " non-retryable");
-            });
+        if (retryable) {
+            log.info("Retryable failure for action={} flow={} batch={} — barrier counters unchanged",
+                    actionName(taskCommand), correlationId, batchIndex);
+            return;
+        }
+
+        barrier.incFailed();
+        log.error("Non-retryable failure recorded flow={} batch={} action={} (deferred until batch closes): completed={} failed={} pending={}",
+                correlationId, batchIndex, actionName(taskCommand),
+                barrier.getTaskCompleted(), barrier.getTaskFailed(), barrier.pending());
+
+        if (barrier.pending() == 0) {
+            closeBatchAndDecide(barrier, correlationId, batchIndex);
         } else {
             repo.save(barrier);
         }
     }
 
-    private void promoteNextBatch(String correlationId, String dagKey, short closedIndex) {
-        // Kickout (per-batch defensive sweep): re-check every task_execution
-        // row in the batch that just closed. A rogue response that slipped
-        // past handleCompleted's per-action check (e.g. validation logic
-        // tightened between writes) gets caught here before we seed the next
-        // batch. Cheap: single indexed query on (correlation_id, batch_index).
-        Optional<String> batchKickout = detectBatchKickout(correlationId, closedIndex);
-        if (batchKickout.isPresent()) {
-            log.error("Kickout (batch) flow={} batch={} reason={}",
-                    correlationId, closedIndex, batchKickout.get());
+    /**
+     * Resolves a fully-drained batch (pending == 0) into one of two outcomes
+     * by inspecting every persisted {@link TaskExecution} row in the batch:
+     * <ul>
+     *   <li><b>Promote</b> — every action ended cleanly (status COMPLETED
+     *       AND no kickout signal in the persisted ActionResponse). Marks
+     *       the barrier CLOSED and calls {@link #promoteNextBatch}, which
+     *       seeds the next batch (mid-flow: relatedEntity PATCHes only, no
+     *       lifecycle event) or, when no next batch exists, dispatches the
+     *       {@code completed} final-state PATCH and publishes the FLOW_
+     *       LIFECYCLE COMPLETED event.</li>
+     *   <li><b>Kickout</b> — at least one persisted row reports a failure
+     *       (status FAILED/CANCELLED, or a deserialized ActionResponse with
+     *       a non-COMPLETED taskStatusCode / non-pass status characteristic).
+     *       Marks the barrier FAILED, dispatches the {@code failed}
+     *       final-state PATCH, and publishes FLOW_LIFECYCLE FAILED. No
+     *       further batches are seeded.</li>
+     * </ul>
+     *
+     * <p>Single decision point + single source of truth (persisted rows)
+     * eliminates the in-memory-counter-vs-DB-row split-brain class of bugs
+     * the per-action approach was prone to.</p>
+     */
+    private void closeBatchAndDecide(BatchBarrier barrier, String correlationId, short batchIndex) {
+        // SINGLE DB hit + SINGLE parse pass per batch close. The same snapshot
+        // is handed to both the kickout decision and the final-state PATCH
+        // cascade so neither collaborator re-queries the rows.
+        BatchResults batch = batchResultsLoader.load(correlationId, batchIndex);
+        Optional<String> kickoutReason = kickoutEvaluator.evaluate(batch);
+
+        if (kickoutReason.isPresent()) {
+            barrier.fail();
+            repo.save(barrier);
+            String reason = "batch " + batchIndex + " kickout: " + kickoutReason.get();
+            log.error("Kickout (batch closed) flow={} batch={} reason={}",
+                    correlationId, batchIndex, reason);
             runAfterCommit(() -> {
-                tmf701.patchProcessFlowState(correlationId, STATE_FAILED);
-                taskCommandsPublisher.publishFailed(correlationId, batchKickout.get());
+                completion.patchFailed(correlationId, batch.responses());
+                taskCommandsPublisher.publishFailed(correlationId, reason);
             });
             return;
         }
+
+        barrier.close();
+        repo.save(barrier);
+        log.info("Batch {} closed cleanly for flow={} — promoting next batch", batchIndex, correlationId);
+        promoteNextBatch(correlationId, barrier.getDagKey(), batchIndex, batch.responses());
+    }
+
+    private void promoteNextBatch(String correlationId, String dagKey, short closedIndex,
+                                  List<ActionResponse> closingBatchResponses) {
+        // Kickout sweep already ran in closeBatchAndDecide() — by the time we
+        // reach here the barrier has been authoritatively decided as CLOSED
+        // (clean). promoteNextBatch is purely the "happy path follow-up":
+        // look up the DAG, find the next batch, seed it (or fire the
+        // completed final-state PATCH when no next batch exists).
 
         Optional<DagDefinition> dagLookup = dagRegistry.find(dagKey);
         if (dagLookup.isEmpty()) {
@@ -272,11 +396,16 @@ public class BarrierService {
         DagDefinition dag = dagLookup.get();
         int nextIndex = closedIndex + 1;
 
-        Optional<DagDefinition.BatchDef> nextBatch = dag.batch(nextIndex);
+        Optional<BatchDef> nextBatch = dag.batch(nextIndex);
         if (nextBatch.isEmpty()) {
+            // True end-of-flow: send the legacy-shape final-state completed PATCH
+            // (state + processStatus / reason characteristics) so downstream
+            // consumers see the same payload they did under the Bonita
+            // workflow. The relatedEntity refs accumulated across the batch
+            // remain on the server (merge-patch leaves them untouched).
             log.info("All batches closed for flow={} — marking processFlow completed", correlationId);
             runAfterCommit(() -> {
-                tmf701.patchProcessFlowState(correlationId, STATE_COMPLETED);
+                completion.patchCompleted(correlationId, closingBatchResponses);
                 taskCommandsPublisher.publishCompleted(correlationId);
             });
             return;
@@ -292,19 +421,22 @@ public class BarrierService {
         seedAndPublishBatch(correlationId, dag, nextBatch.get(), processFlow);
     }
 
-    private void seedAndPublishBatch(final String correlationId, final DagDefinition dag,
-                                      final DagDefinition.BatchDef batch,
-                                      final ProcessFlow processFlow) {
+    private void seedAndPublishBatch(String correlationId, DagDefinition dag,
+                                      BatchDef batch, ProcessFlow processFlow) {
         // Guard against a batch with null/empty actions — a DAG YAML that got
         // through the loader but carries an empty batch would NPE on
         // getActions().size() or publish zero task.execute commands (infinite
         // wait). Fail the flow cleanly instead.
-        List<DagDefinition.ActionDef> actions = batch.getActions();
+        List<ActionDef> actions = batch.getActions();
         if (actions == null || actions.isEmpty()) {
             log.error("DAG {} batch {} has no actions — marking flow {} failed",
                     dag.getDagKey(), batch.getIndex(), correlationId);
+            // Empty responses list correctly drives the cascade to
+            // PROCESS_STATUS_FAILED + REASON_NO_TASK — the legacy
+            // "no actionResponseList" arm. We have no rows to load because
+            // the batch never produced any work.
             runAfterCommit(() -> {
-                tmf701.patchProcessFlowState(correlationId, STATE_FAILED);
+                completion.patchFailed(correlationId, List.of());
                 taskCommandsPublisher.publishFailed(correlationId,
                         "DAG " + dag.getDagKey() + " batch " + batch.getIndex() + " has no actions");
             });
@@ -391,15 +523,14 @@ public class BarrierService {
      * For a batch with K total unique dependencies across its actions, this issues
      * exactly 1 SQL query instead of up to K.</p>
      */
-    private Map<String, String> batchResolveDependencies(final String correlationId,
-                                                          final DagDefinition.BatchDef batch) {
-        List<DagDefinition.ActionDef> actions = batch.getActions();
+    private Map<String, String> batchResolveDependencies(String correlationId, BatchDef batch) {
+        List<ActionDef> actions = batch.getActions();
         if (actions == null || actions.isEmpty()) {
             return Map.of();
         }
         List<String> allDeps = actions.stream()
                 .filter(Objects::nonNull)
-                .map(DagDefinition.ActionDef::getDependsOn)
+                .map(ActionDef::getDependsOn)
                 .filter(deps -> deps != null && !deps.isEmpty())
                 .flatMap(List::stream)
                 .distinct()
@@ -423,8 +554,7 @@ public class BarrierService {
      * Extracts dependency results for a single action from the pre-loaded batch map.
      * Logs a warning for any declared dependency that has no COMPLETED row.
      */
-    private Map<String, Object> dependencyResultsFor(DagDefinition.ActionDef action,
-                                                      Map<String, String> batchResolved) {
+    private Map<String, Object> dependencyResultsFor(ActionDef action, Map<String, String> batchResolved) {
         List<String> dependsOn = action.getDependsOn();
         if (dependsOn == null || dependsOn.isEmpty()) {
             return Map.of();
@@ -443,20 +573,32 @@ public class BarrierService {
     }
 
     /**
-     * PATCHes the parent processFlow's {@code relatedEntity} array with the
-     * completed task's id + href pair — mirrors the upstream
-     * {@code ActionBuilder.enrichProcessFlowWithRelatedEntity} contract,
-     * which fails closed when either identifier is missing rather than
-     * writing a half-populated entity the downstream can't resolve.
+     * PATCHes the parent processFlow's {@code relatedEntity[]} AND
+     * {@code taskFlow[]} arrays with the just-completed task's id + href pair
+     * — mirrors the upstream {@code enrichProcessFlow} contract, which calls
+     * {@code addRelatedEntityItem(...)} and {@code addTaskFlowItem(...)} in
+     * lock-step so both untyped (TMF-630) and typed (TMF-701) consumers see
+     * the new taskFlow.
      *
-     * <p>Skip conditions (any one of these aborts the PATCH):
+     * <p><b>Per-action only.</b> This method is the ONLY place that
+     * mutates the ref arrays. It runs once per COMPLETED / FAILED /
+     * CANCELLED task event and never touches {@code state} or
+     * {@code processStatus} / {@code statusChangeReason} characteristics —
+     * those are the exclusive domain of the final-state PATCH dispatched
+     * by {@link ProcessFlowCompletionService} when the barrier drains and
+     * either no next batch exists or a kickout is detected.</p>
+     *
+     * <p>Skip conditions (any one of these aborts the PATCH and writes
+     * neither array):
      * <ul>
      *   <li>{@code result} or {@code action} missing — nothing to patch with</li>
-     *   <li>{@code result.id} null/blank — the {@code relatedEntity.id} slot</li>
-     *   <li>{@code taskFlowResponse.href} null/blank — the {@code relatedEntity.href} slot</li>
+     *   <li>{@code result.id} null/blank — the {@code relatedEntity.id} /
+     *       {@code taskFlow.id} slot</li>
+     *   <li>{@code taskFlowResponse.href} null/blank — the
+     *       {@code relatedEntity.href} / {@code taskFlow.href} slot</li>
      * </ul>
-     * Both slots are required by the TMF-701 RelatedEntity schema; sending
-     * one without the other produces a reference the consumer cannot follow.</p>
+     * Both slots are required by the TMF-701 schema; sending one without
+     * the other produces a reference the consumer cannot follow.</p>
      */
     private void patchParentProcessFlow(TaskCommand taskCommand, String correlationId) {
         ActionResponse result = taskCommand.getResult();
@@ -480,96 +622,6 @@ public class BarrierService {
                 taskId,
                 taskFlowHref,
                 taskCommand.getAction().getActionName());
-    }
-
-    /**
-     * Returns a non-empty reason if the {@link ActionResponse} attached to a
-     * COMPLETED task.event qualifies as a <b>kickout</b>. A task-runner can
-     * report COMPLETED at the envelope level while the embedded actionResponse
-     * indicates a business failure — that mismatch must not advance the flow.
-     *
-     * <p>Kickout triggers:</p>
-     * <ul>
-     *   <li>{@code actionResponse.taskStatusCode} is present and not COMPLETED</li>
-     *   <li>{@code taskFlowResponse.characteristic[name=status]} is present and not "pass"</li>
-     * </ul>
-     * A missing result is NOT a kickout — the envelope-level COMPLETED is trusted.
-     *
-     * @return reason string if the result is a kickout, empty if it's valid
-     */
-    private Optional<String> detectKickout(TaskCommand taskCommand) {
-        ActionResponse result = taskCommand.getResult();
-        if (result == null) {
-            return Optional.empty();
-        }
-
-        String taskStatusCode = result.getTaskStatusCode();
-        if (taskStatusCode != null && !TASK_STATUS_COMPLETED.equalsIgnoreCase(taskStatusCode)) {
-            return Optional.of("actionResponse.taskStatusCode=" + taskStatusCode);
-        }
-
-        TaskFlow taskFlowResponse = result.getTaskFlowResponse();
-        if (taskFlowResponse != null && taskFlowResponse.getCharacteristic() != null) {
-            for (ProcessFlow.Characteristic c : taskFlowResponse.getCharacteristic()) {
-                if (c == null || !STATUS_CHARACTERISTIC.equalsIgnoreCase(c.getName())) {
-                    continue;
-                }
-                String status = c.getValue();
-                if (status != null && !STATUS_PASS.equalsIgnoreCase(status)) {
-                    return Optional.of("actionResponse.taskFlowResponse.status=" + status);
-                }
-                break;
-            }
-        }
-
-        return Optional.empty();
-    }
-
-    /**
-     * Re-scans every TaskExecution row in the just-closed batch for a kickout
-     * signal, using the same rules as {@link #detectKickout}. Returns the
-     * first non-empty reason. Designed as a defensive check — the per-action
-     * path in {@link #handleCompleted} is the primary gate.
-     */
-    private Optional<String> detectBatchKickout(final String correlationId, final short batchIndex) {
-        List<TaskExecution> rows = taskExecutionRepo
-                .findAllByCorrelationIdAndBatchIndex(correlationId, batchIndex);
-        for (TaskExecution te : rows) {
-            if (te.getStatus() == TaskStatus.FAILED || te.getStatus() == TaskStatus.CANCELLED) {
-                return Optional.of("batch " + batchIndex + " had " + te.getStatus()
-                        + " action=" + te.getActionName());
-            }
-        }
-        return Optional.empty();
-    }
-
-    /**
-     * Short-circuits an in-flight flow: marks the current barrier failed,
-     * PATCHes the TMF-701 processFlow to {@code failed}, and publishes a
-     * {@code flow.lifecycle} failed event. Called from the per-action kickout
-     * check in {@link #handleCompleted}.
-     *
-     * <p>Other open barriers on the same flow are intentionally left alone.
-     * Two reasons:</p>
-     * <ul>
-     *   <li>The flow-level signal has already been sent (processFlow=failed
-     *       plus {@code flow.lifecycle} FAILED) — downstream consumers stop
-     *       reacting to this flow immediately.</li>
-     *   <li>Sibling barriers either naturally close on their own completed
-     *       event stream or get trimmed by the pg_cron retention job. Forcing
-     *       them closed here would mask whatever state their in-flight tasks
-     *       eventually produce and make diagnosis harder.</li>
-     * </ul>
-     */
-    private void kickoutFlow(final String correlationId, final BatchBarrier currentBarrier,
-                              final String reason) {
-        log.error("Kickout flow={} reason={}", correlationId, reason);
-        currentBarrier.fail();
-        repo.save(currentBarrier);
-        runAfterCommit(() -> {
-            tmf701.patchProcessFlowState(correlationId, STATE_FAILED);
-            taskCommandsPublisher.publishFailed(correlationId, reason);
-        });
     }
 
     /**

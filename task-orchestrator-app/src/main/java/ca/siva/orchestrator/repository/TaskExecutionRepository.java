@@ -84,7 +84,19 @@ public interface TaskExecutionRepository extends JpaRepository<TaskExecution, Ta
             @Param("correlationId") String correlationId,
             @Param("actionNames") Collection<String> actionNames);
 
-    /** All task-execution rows for a given flow + batch — used by kickout sweep. */
+    /**
+     * All task-execution rows for a given flow + batch. Drives both the
+     * kickout sweep ({@link ca.siva.orchestrator.service.BatchKickoutEvaluator})
+     * AND the final-state PATCH cascade
+     * ({@link ca.siva.orchestrator.service.ProcessFlowCompletionService}) —
+     * the load happens exactly once per batch close in
+     * {@link ca.siva.orchestrator.service.BatchResultsLoader} and the same
+     * snapshot serves both consumers. The flow-wide variant
+     * ({@code findAllByCorrelationId}) was removed because end-of-flow
+     * cascades over the closing batch's responses are equivalent: every
+     * prior batch was promoted on a clean kickout sweep, so its taskStatus
+     * codes were PASSED and contribute nothing to the priority cascade.
+     */
     @Query("SELECT te FROM TaskExecution te " +
            "WHERE te.id.correlationId = :correlationId " +
            "AND te.batchIndex = :batchIndex")

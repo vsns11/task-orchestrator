@@ -5,7 +5,11 @@ import ca.siva.orchestrator.config.AppConfig.TransientClientError;
 import ca.siva.orchestrator.config.FidCredentialsProperties;
 import ca.siva.orchestrator.config.HttpClientProperties;
 import ca.siva.orchestrator.config.Tmf701Properties;
+import ca.siva.orchestrator.domain.ProcessFlowStateType;
 import ca.siva.orchestrator.dto.tmf.ProcessFlow;
+import ca.siva.orchestrator.dto.tmf.ProcessFlow.Characteristic;
+import ca.siva.orchestrator.dto.tmf.ProcessFlow.RelatedEntity;
+import ca.siva.orchestrator.dto.tmf.TaskFlowRef;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -52,6 +56,15 @@ public class Tmf701Client {
 
     private static final String RELATED_ENTITY_ROLE = "TaskFlow";
     private static final String RELATED_ENTITY_TYPE = "RelatedEntity";
+    /**
+     * Default {@code @referredType} stamped on every {@link TaskFlowRef}
+     * appended to {@code processFlow.taskFlow[]}. Mirrors the legacy Bonita
+     * {@code buildTaskFlow(tf.getId(), atReferredType, tf.getHref(), ...)}
+     * convention where {@code atReferredType} carries the action name —
+     * {@link #patchProcessFlowAddTaskFlowRef} uses the action name when
+     * present and falls back to this constant when the caller passes blank.
+     */
+    private static final String TASKFLOW_REFERRED_TYPE_DEFAULT = "TaskFlow";
 
     /**
      * TMF-630 (§ REST Design Guidelines) mandates JSON Merge Patch (RFC 7396)
@@ -123,27 +136,34 @@ public class Tmf701Client {
     }
 
     /**
-     * Registers a taskFlow reference on the parent processFlow.
+     * Registers a taskFlow reference on the parent processFlow — populates
+     * BOTH {@code relatedEntity[]} (untyped TMF entity ref) AND
+     * {@code taskFlow[]} (typed TMF-701 {@link TaskFlowRef} array) on the
+     * same merge-patch, mirroring the legacy Bonita
+     * {@code enrichProcessFlow} contract:
+     * <pre>
+     *   processFlow.addRelatedEntityItem( buildRelatedEntity(id, href, ...) );
+     *   processFlow.addTaskFlowItem     ( buildTaskFlow(tf.getId(), atReferredType, tf.getHref(), ...) );
+     * </pre>
      *
-     * <p>The TMF-701 {@code relatedEntity} element requires both {@code id}
-     * and {@code href} — the pair together resolves the referenced resource.
-     * This method fails closed (warns and returns) when either is missing,
-     * mirroring the upstream {@code ActionBuilder.enrichProcessFlowWithRelatedEntity}
-     * validation rather than PATCHing a half-populated entity.</p>
+     * <p>Both ids/hrefs are required — the method fails closed (warns and
+     * returns) when either is missing, mirroring the upstream
+     * {@code enrichProcessFlowWithRelatedEntity} validation rather than
+     * PATCHing a half-populated entity.</p>
      *
      * <p><b>Append semantics via GET-then-PATCH.</b> TMF-630 mandates
      * JSON Merge Patch (RFC 7396) for PATCH bodies, which REPLACES arrays
      * rather than appending to them. To preserve previously-registered
-     * taskFlow references we:</p>
+     * refs we:</p>
      * <ol>
-     *   <li>GET the current processFlow,</li>
-     *   <li>copy its {@code relatedEntity} list (if any),</li>
-     *   <li>append the new {@link ProcessFlow.RelatedEntity}, skipping
-     *       duplicates by {@code id},</li>
-     *   <li>PATCH with the merged list.</li>
+     *   <li>GET the current processFlow once,</li>
+     *   <li>copy both {@code relatedEntity} and {@code taskFlow} lists,</li>
+     *   <li>append the new entries (skipping duplicates by {@code id} on
+     *       both arrays independently),</li>
+     *   <li>PATCH with both merged lists in a single request.</li>
      * </ol>
      *
-     * <p>If the GET fails we fall back to PATCHing just the new entry —
+     * <p>If the GET fails we fall back to PATCHing just the new entries —
      * the orchestration loop must not stall on TMF-701 transport hiccups
      * and losing previously-attached refs on a rare GET failure is
      * preferable to losing this one.</p>
@@ -153,8 +173,16 @@ public class Tmf701Client {
      * If-Match, so a lost update is possible when two tasks finish inside
      * the same narrow window. Tolerated today; the long-term fix is to
      * switch to RFC 6902 JSON Patch ({@code application/json-patch+json})
-     * with an explicit {@code {"op":"add","path":"/relatedEntity/-"}}
-     * operation once the server supports it.</p>
+     * with explicit {@code {"op":"add","path":"/relatedEntity/-"}} +
+     * {@code {"op":"add","path":"/taskFlow/-"}} operations once the server
+     * supports it.</p>
+     *
+     * @param actionName the action's logical name; used for both the
+     *                   {@code relatedEntity.name} slot and the
+     *                   {@code taskFlow.@referredType} slot. When blank we
+     *                   stamp {@link #TASKFLOW_REFERRED_TYPE_DEFAULT} on the
+     *                   taskFlow ref so the {@code @referredType} field is
+     *                   always populated.
      */
     public void patchProcessFlowAddTaskFlowRef(String processFlowId, String taskFlowId,
                                                 String taskFlowHref, String actionName) {
@@ -165,7 +193,7 @@ public class Tmf701Client {
             return;
         }
 
-        ProcessFlow.RelatedEntity newEntry = ProcessFlow.RelatedEntity.builder()
+        RelatedEntity newRelatedEntity = RelatedEntity.builder()
                 .id(taskFlowId)
                 .href(taskFlowHref)
                 .role(RELATED_ENTITY_ROLE)
@@ -174,47 +202,171 @@ public class Tmf701Client {
                 .name(Objects.toString(actionName, ""))
                 .build();
 
-        // Start from the server's current list so the merge-patch reassignment
-        // preserves siblings; fall back to an empty list if GET fails or there
-        // are none attached yet.
-        List<ProcessFlow.RelatedEntity> merged = new ArrayList<>(
-                getProcessFlow(processFlowId)
-                        .map(ProcessFlow::getRelatedEntity)
-                        .orElse(List.of()));
+        String referredType = (actionName != null && !actionName.isBlank())
+                ? actionName : TASKFLOW_REFERRED_TYPE_DEFAULT;
+        TaskFlowRef newTaskFlowRef = TaskFlowRef.builder()
+                .id(taskFlowId)
+                .href(taskFlowHref)
+                .referredType(referredType)
+                .build();
 
-        // Idempotency: if this taskFlowId is already attached (retry / redelivery
-        // of the same task start event), don't append a duplicate.
-        boolean alreadyPresent = merged.stream()
+        // ONE GET — feed both merge lists from the same snapshot so we don't
+        // double the read cost when populating both arrays.
+        Optional<ProcessFlow> snapshot = getProcessFlow(processFlowId);
+
+        List<RelatedEntity> mergedRelatedEntities = new ArrayList<>(
+                snapshot.map(ProcessFlow::getRelatedEntity).orElse(List.of()));
+        boolean relatedAlreadyPresent = mergedRelatedEntities.stream()
                 .anyMatch(re -> re != null && taskFlowId.equals(re.getId()));
-        if (!alreadyPresent) {
-            merged.add(newEntry);
+        if (!relatedAlreadyPresent) {
+            mergedRelatedEntities.add(newRelatedEntity);
         }
 
-        // @JsonInclude(NON_NULL) on ProcessFlow/RelatedEntity ensures only
-        // relatedEntity is sent on the wire — all other processFlow fields
-        // stay as the server has them.
+        List<TaskFlowRef> mergedTaskFlowRefs = new ArrayList<>(
+                snapshot.map(ProcessFlow::getTaskFlow).orElse(List.of()));
+        boolean taskFlowAlreadyPresent = mergedTaskFlowRefs.stream()
+                .anyMatch(tf -> tf != null && taskFlowId.equals(tf.getId()));
+        if (!taskFlowAlreadyPresent) {
+            mergedTaskFlowRefs.add(newTaskFlowRef);
+        }
+
+        // @JsonInclude(NON_NULL) on ProcessFlow/RelatedEntity/TaskFlowRef
+        // ensures only relatedEntity + taskFlow arrays are sent on the wire —
+        // all other processFlow fields stay as the server has them.
         ProcessFlow patch = new ProcessFlow();
-        patch.setRelatedEntity(merged);
+        patch.setRelatedEntity(mergedRelatedEntities);
+        patch.setTaskFlow(mergedTaskFlowRefs);
 
         doPatch(processFlowId, patch,
                 "Patch processFlow " + processFlowId
-                        + " (merge relatedEntity id=" + taskFlowId
+                        + " (merge relatedEntity+taskFlow id=" + taskFlowId
                         + " href=" + taskFlowHref
-                        + " existingCount=" + (merged.size() - (alreadyPresent ? 0 : 1))
-                        + " alreadyPresent=" + alreadyPresent + ")");
+                        + " referredType=" + referredType
+                        + " relatedExistingCount=" + (mergedRelatedEntities.size() - (relatedAlreadyPresent ? 0 : 1))
+                        + " taskFlowExistingCount=" + (mergedTaskFlowRefs.size() - (taskFlowAlreadyPresent ? 0 : 1))
+                        + " relatedAlreadyPresent=" + relatedAlreadyPresent
+                        + " taskFlowAlreadyPresent=" + taskFlowAlreadyPresent + ")");
     }
 
-    /** Updates the processFlow lifecycle state (e.g. "completed", "failed"). */
-    public void patchProcessFlowState(String processFlowId, String state) {
+    /**
+     * Updates the processFlow lifecycle state. Takes the typed
+     * {@link ProcessFlowStateType} so callers cannot accidentally send
+     * an unrecognised wire string — the only place the literal value
+     * is materialised is at the wire boundary inside this method.
+     */
+    public void patchProcessFlowState(String processFlowId, ProcessFlowStateType state) {
+        if (state == null) {
+            log.warn("Patch processFlow {} state skipped — state is required", processFlowId);
+            return;
+        }
         ProcessFlow patch = new ProcessFlow();
-        patch.setState(state);
+        patch.setState(state.getValue());
         doPatch(processFlowId, patch,
-                "Patch processFlow " + processFlowId + " state=" + state);
+                "Patch processFlow " + processFlowId + " state=" + state.getValue());
+    }
+
+    /**
+     * Sends the legacy-shape "final state" PATCH used at flow completion / failure.
+     *
+     * <p>Called once per flow when the orchestrator decides the flow has
+     * reached its end — either every batch has closed cleanly (success) or
+     * a kickout / non-retryable failure has stopped further promotion
+     * (failure). The same body shape applies to both outcomes; only the
+     * {@code state} value differs ({@code completed} vs {@code failed}).</p>
+     *
+     * <p>Body shape (mirrors the upstream Bonita
+     * {@code processFlowEntryAction}):</p>
+     * <ul>
+     *   <li>{@code state} — final lifecycle ({@code completed} or {@code failed})</li>
+     *   <li>{@code characteristic} — preserved server characteristics with the
+     *       {@code processStatus} entry upserted (always) and the
+     *       {@code statusChangeReason} entry upserted (only when non-null)</li>
+     * </ul>
+     *
+     * <p>{@code relatedEntity} and {@code taskFlow} are intentionally NOT
+     * included: JSON Merge Patch (RFC 7396) leaves unspecified fields as-is,
+     * so the entity / taskFlow refs added by earlier
+     * {@link #patchProcessFlowAddTaskFlowRef} calls survive untouched. The
+     * {@code characteristic} list, in contrast, IS replaced by merge-patch
+     * semantics — hence the GET-first read-modify-write here, same pattern
+     * as {@link #patchProcessFlowAddTaskFlowRef}.</p>
+     *
+     * <p><b>Idempotency.</b> Re-running with the same arguments produces a
+     * body byte-identical to the first run because we upsert by
+     * characteristic name (case-insensitive): any pre-existing
+     * {@code processStatus} / {@code statusChangeReason} entries are removed
+     * before the new ones are appended, so retries / redeliveries don't grow
+     * the list.</p>
+     *
+     * @param state               final lifecycle state ({@link ProcessFlowStateType#COMPLETED}
+     *                            or {@link ProcessFlowStateType#FAILED}) — required
+     * @param processStatus       value for the {@code processStatus}
+     *                            characteristic; always sent when non-null
+     * @param statusChangeReason  value for the {@code statusChangeReason}
+     *                            characteristic; sent only when non-null/non-blank
+     */
+    public void patchProcessFlowFinalState(String processFlowId, ProcessFlowStateType state,
+                                            String processStatus, String statusChangeReason) {
+        if (state == null) {
+            log.warn("Patch processFlow {} final-state skipped — state is required", processFlowId);
+            return;
+        }
+        String stateValue = state.getValue();
+
+        // Read existing characteristics so merge-patch doesn't clobber siblings
+        // (e.g. peinNumber, SDT TX id) the server is already storing. Falling
+        // back to an empty list when GET fails or the resource has none keeps
+        // the final-state PATCH from stalling on transport hiccups — losing
+        // unrelated characteristics on a rare GET failure is preferable to
+        // never marking the flow completed.
+        List<Characteristic> merged = new ArrayList<>(
+                getProcessFlow(processFlowId)
+                                .map(ProcessFlow::getCharacteristic)
+                        .orElse(List.of()));
+
+        // Upsert by name (case-insensitive — TMF-630 characteristic names are
+        // not formally case-sensitive). Removes any prior processStatus /
+        // statusChangeReason entry so the re-issued final-state PATCH (retry,
+        // redelivery) doesn't grow the list across runs.
+        merged.removeIf(c -> c != null && c.getName() != null &&
+                ("processStatus".equalsIgnoreCase(c.getName())
+                        || "statusChangeReason".equalsIgnoreCase(c.getName())));
+
+        if (processStatus != null) {
+            merged.add(buildCharacteristic("processStatus", processStatus));
+        }
+        if (statusChangeReason != null && !statusChangeReason.isBlank()) {
+            merged.add(buildCharacteristic("statusChangeReason", statusChangeReason));
+        }
+
+        // Mirror the legacy Bonita processFlowEntryAction body: id is echoed
+        // in the payload alongside state + characteristic so consumers that
+        // diff the request body against the stored resource see the same
+        // shape they did under the old workflow. The URL already targets the
+        // resource by id; including it in the body is harmless under
+        // merge-patch semantics (id is the identity field, not a mutation).
+        ProcessFlow patch = new ProcessFlow();
+        patch.setId(processFlowId);
+        patch.setState(stateValue);
+        patch.setCharacteristic(merged);
+
+        doPatch(processFlowId, patch,
+                "Patch processFlow " + processFlowId
+                        + " final-state state=" + stateValue
+                        + " processStatus=" + processStatus
+                        + " statusChangeReason=" + statusChangeReason);
     }
 
     /**
      * Fetches the processFlow object from TMF-701 by ID.
      * Used when promoting to the next batch — avoids keeping the processFlow in memory.
+     *
+     * <p>Logs the full deserialized processFlow at INFO on a successful read
+     * so operators can validate end-to-end that the per-action ref PATCHes
+     * (relatedEntity[] / taskFlow[]) and the final-state PATCH (state +
+     * processStatus / statusChangeReason characteristics) actually landed on
+     * the server. The PATCH side is already logged in {@link #doPatch}; this
+     * read-side log closes the loop.</p>
      *
      * @param processFlowId the processFlow UUID
      * @return the processFlow object, or empty if not found or call fails
@@ -229,6 +381,7 @@ public class Tmf701Client {
                             .accept(JSON_UTF8)
                             .retrieve()
                             .body(ProcessFlow.class));
+            logProcessFlowPayload(processFlowId, processFlow);
             return Optional.ofNullable(processFlow);
         } catch (RestClientResponseException e) {
             log.error("TMF-701 Get failed url={} status={} responseBody={} exception={}",
@@ -237,6 +390,32 @@ public class Tmf701Client {
         } catch (RuntimeException e) {
             log.error("TMF-701 Get transport error url={} exception={}", url, e.toString(), e);
             return Optional.empty();
+        }
+    }
+
+    /**
+     * Serializes the just-fetched processFlow back to JSON and logs it at
+     * INFO. Best-effort — a serialization failure here must NOT break the
+     * GET (the parsed {@link ProcessFlow} is already in hand and the caller
+     * will use it regardless), so the catch downgrades to a one-line WARN.
+     *
+     * <p>The re-serialization uses the same {@link ObjectMapper} that
+     * Jackson used to deserialize, so the logged body's field names and
+     * {@code @type} / {@code @baseType} / {@code @referredType} naming are
+     * byte-faithful to the wire shape — exactly what an operator needs when
+     * cross-checking against the request body logged in {@link #doPatch}.</p>
+     */
+    private void logProcessFlowPayload(String processFlowId, ProcessFlow processFlow) {
+        if (processFlow == null) {
+            log.info("TMF-701 Get processFlowId={} payload=<null body>", processFlowId);
+            return;
+        }
+        try {
+            String json = objectMapper.writeValueAsString(processFlow);
+            log.info("TMF-701 Get processFlowId={} payload={}", processFlowId, json);
+        } catch (JsonProcessingException e) {
+            log.warn("TMF-701 Get processFlowId={} payload-log-skipped (serialization failed) exception={}",
+                    processFlowId, e.toString());
         }
     }
 
@@ -334,6 +513,30 @@ public class Tmf701Client {
                 throw e;
             }
         });
+    }
+
+    /** TMF-630 string-typed characteristic literals. */
+    private static final String CHAR_TYPE_STRING = "string";
+
+    /**
+     * Builds a TMF-630 string-typed {@link Characteristic} via setter mutation.
+     * Centralizes the {@code valueType="string"} convention so every caller
+     * produces a wire-identical shape — and so a future migration to a
+     * different value-type (e.g. structured) is a one-line change.
+     *
+     * <p>The {@code @type} and {@code @baseType} fields are populated to
+     * mirror the legacy Bonita {@code Characteristic.setAtType(STRING) /
+     * setAtBaseType(STRING)} pair, so the wire payload is byte-identical to
+     * what {@code processFlowEntryAction} produced upstream.</p>
+     */
+    private static Characteristic buildCharacteristic(String name, String value) {
+        Characteristic c = new Characteristic();
+        c.setName(name);
+        c.setValue(value);
+        c.setValueType(CHAR_TYPE_STRING);
+        c.setType(CHAR_TYPE_STRING);
+        c.setBaseType(CHAR_TYPE_STRING);
+        return c;
     }
 
     /** Resolves the full URL with {id} substituted — for log output. */

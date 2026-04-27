@@ -1,5 +1,7 @@
 package ca.siva.orchestrator.dto.tmf;
 
+import ca.siva.orchestrator.dto.tmf.ProcessFlow.Characteristic;
+import ca.siva.orchestrator.dto.tmf.ProcessFlow.RelatedEntity;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -10,7 +12,6 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.util.List;
-import java.util.Map;
 
 /**
  * Generic wrapper for events on the {@code notification.management} topic.
@@ -46,8 +47,8 @@ public class NotificationEvent {
     private String state;
     private List<Object> channel;
     private List<Object> relatedParty;
-    private List<ProcessFlow.RelatedEntity> relatedEntity;
-    private List<ProcessFlow.Characteristic> characteristic;
+    private List<RelatedEntity> relatedEntity;
+    private List<Characteristic> characteristic;
     private String processFlowSpecification;
 
     // ---- async response fields (when @type = "TaskFinalAsyncResponseSend") ----

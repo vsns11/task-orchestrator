@@ -2,11 +2,31 @@ plugins {
     id 'java'
     id 'org.springframework.boot' version '3.3.5' apply false
     id 'io.spring.dependency-management' version '1.1.6'
+    // SonarQube analyzer — pushes results to a SonarQube/SonarCloud server
+    // (run with: ./gradlew sonar -Dsonar.host.url=... -Dsonar.token=...).
+    // Without a server it's a no-op; PMD below is what produces local reports.
+    id 'org.sonarqube' version '5.1.0.4882'
+}
+
+// ----- SonarQube project metadata (consumed when ./gradlew sonar is run) -----
+sonar {
+    properties {
+        property 'sonar.projectKey',  'ca.siva.task-orchestrator'
+        property 'sonar.projectName', 'task-orchestrator'
+        property 'sonar.sourceEncoding', 'UTF-8'
+        // Coverage report locations — wired so JaCoCo XML (when added) is picked up.
+        property 'sonar.coverage.jacoco.xmlReportPaths',
+                 '**/build/reports/jacoco/test/jacocoTestReport.xml'
+    }
 }
 
 subprojects {
     apply plugin: 'java'
     apply plugin: 'io.spring.dependency-management'
+    // PMD = local equivalent of the SonarQube ruleset (UnusedPrivateMethod,
+    // UnusedImports, UnusedLocalVariable, EmptyMethodInAbstractClassShouldBeAbstract,
+    // …). Reports under each module's build/reports/pmd/{main,test}.html.
+    apply plugin: 'pmd'
 
     group = rootProject.property('group')
     version = rootProject.property('version')
@@ -54,5 +74,28 @@ subprojects {
 
     tasks.withType(Test).configureEach {
         useJUnitPlatform()
+    }
+
+    // ----- PMD configuration (Sonar-equivalent local linting) -----
+    pmd {
+        toolVersion         = rootProject.property('pmdVersion')
+        // Codebase has been scrubbed clean — fail the build on any new
+        // violation so regressions don't sneak back in. Flip to true (and
+        // run `./gradlew pmdMain pmdTest --continue`) when bulk-fixing a
+        // batch of new findings.
+        ignoreFailures      = false
+        // Project-local ruleset (curated subset of PMD's "bestpractices",
+        // "errorprone", "performance" — same families SonarQube enforces).
+        ruleSets            = []
+        ruleSetFiles        = files(rootProject.file('config/pmd/pmd-ruleset.xml'))
+        // Print violations to console as well as the HTML/XML reports so
+        // CI logs surface the offending file:line without report scraping.
+        consoleOutput       = true
+    }
+    tasks.withType(Pmd).configureEach {
+        reports {
+            xml.required  = true
+            html.required = true
+        }
     }
 }

@@ -1,8 +1,10 @@
 package ca.siva.orchestrator.config;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.convert.DurationUnit;
 
 import java.time.Duration;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 
 /**
@@ -43,8 +45,14 @@ import java.util.List;
  */
 @ConfigurationProperties(prefix = "orchestrator.http")
 public record HttpClientProperties(
-        Duration connectTimeout,
-        Duration readTimeout,
+        // @DurationUnit(SECONDS) tells Spring Boot's binder that a bare
+        // number (e.g. `connect-timeout: 120`) should be interpreted as
+        // SECONDS, not the library default of milliseconds. Values with an
+        // explicit unit — `500ms`, `PT5M`, `30s` — still win over the
+        // annotation. This matches operator expectations and prevents
+        // accidental sub-second timeouts from a unitless yml value.
+        @DurationUnit(ChronoUnit.SECONDS) Duration connectTimeout,
+        @DurationUnit(ChronoUnit.SECONDS) Duration readTimeout,
         List<Integer> retryableStatuses,
         Retry retry
 ) {

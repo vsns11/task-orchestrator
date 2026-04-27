@@ -14,7 +14,7 @@ import org.springframework.boot.test.web.client.TestRestTemplate;
 import java.util.List;
 import java.util.Map;
 
-import static java.time.Duration.ofSeconds;
+import static java.time.Duration.ofSeconds; // NOPMD - PMD 7.0.0 misses uses inside Awaitility chains (used at line 61)
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
